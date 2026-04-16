@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
+from functools import lru_cache
 from math import ceil
 
 
 VALID_RESULTS = {"1-0", "0-1", "1/2-1/2", "BYE"}
+VALID_REGISTRATION_FIELD_TYPES = {"text", "dropdown"}
 
 
 def normalize_name(name: str) -> str:
@@ -47,6 +50,27 @@ def parse_int(value: str | None, default: int | None = None) -> int | None:
         return int(float(cleaned))
     except ValueError:
         return default
+
+
+def round_rating_value(value: float | int | None, default: int | None = None) -> int | None:
+    if value is None:
+        return default
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return default
+    if numeric >= 0:
+        return int(numeric + 0.5)
+    return -int(abs(numeric) + 0.5)
+
+
+def parse_datetime_local(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    return datetime.fromisoformat(cleaned).isoformat(timespec="minutes")
 
 
 def fuzzy_best_match(name: str, candidates: list[str]) -> tuple[str | None, float]:
@@ -85,12 +109,58 @@ def parse_registration_csv(file_storage) -> list[dict]:
     return [row for row in rows if row["name"]]
 
 
+def parse_registration_form_fields(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        raw_fields = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw_fields, list):
+        return []
+    fields = []
+    for raw in raw_fields:
+        if not isinstance(raw, dict):
+            continue
+        field_type = (raw.get("type") or "").strip().lower()
+        if field_type not in VALID_REGISTRATION_FIELD_TYPES:
+            continue
+        label = " ".join(str(raw.get("label") or "").split())
+        if not label:
+            continue
+        label = label[:80]
+        options = []
+        if field_type == "dropdown":
+            raw_options = raw.get("options") or []
+            if not isinstance(raw_options, list):
+                raw_options = []
+            seen = set()
+            for option in raw_options:
+                cleaned = " ".join(str(option or "").split())
+                if not cleaned:
+                    continue
+                normalized = cleaned.casefold()
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                options.append(cleaned[:80])
+            if len(options) < 2:
+                continue
+        fields.append({"type": field_type, "label": label, "options": options})
+    return fields
+
+
+def serialize_registration_form_fields(fields: list[dict]) -> str:
+    return json.dumps(parse_registration_form_fields(json.dumps(fields)), ensure_ascii=True)
+
+
 def fetch_tournaments(db):
     return db.execute(
         """
         SELECT
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
-          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
+          registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
+          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
           is_historical, is_public, is_active_public
         FROM tournament
         ORDER BY is_active_public DESC, event_date DESC, id DESC
@@ -103,7 +173,8 @@ def fetch_public_tournaments(db):
         """
         SELECT
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
-          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
+          registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
+          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
           is_historical, is_public, is_active_public
         FROM tournament
         WHERE is_public = 1
@@ -117,7 +188,8 @@ def fetch_active_tournament(db):
         """
         SELECT
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
-          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
+          registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
+          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
           is_historical, is_public, is_active_public
         FROM tournament
         WHERE is_active_public = 1
@@ -132,7 +204,8 @@ def fetch_tournament_by_slug(db, slug: str):
         """
         SELECT
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
-          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
+          registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
+          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
           is_historical, is_public, is_active_public
         FROM tournament
         WHERE slug = ?
@@ -150,30 +223,118 @@ def unique_slug(db, proposed: str) -> str:
     return candidate
 
 
+def registration_open_for_tournament(tournament, current_time: datetime | None = None) -> bool:
+    if tournament is None or tournament["is_historical"]:
+        return False
+    if not tournament["registration_enabled"]:
+        return False
+    opens_at = tournament["registration_opens_at"]
+    if not opens_at:
+        return False
+    now = current_time or datetime.now()
+    return datetime.fromisoformat(opens_at) <= now
+
+
+def fetch_open_registration_tournaments(db, current_time: datetime | None = None):
+    tournaments = db.execute(
+        """
+        SELECT
+          id, name, slug, event_date, rounds_planned, status, registration_csv_name,
+          registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
+          source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
+          is_historical, is_public, is_active_public
+        FROM tournament
+        WHERE is_historical = 0 AND status != 'completed' AND registration_enabled = 1 AND registration_opens_at IS NOT NULL
+        ORDER BY event_date ASC, id ASC
+        """
+    ).fetchall()
+    return [tournament for tournament in tournaments if registration_open_for_tournament(tournament, current_time)]
+
+
+def registration_counts(db, tournament_id: int) -> dict[str, int]:
+    rows = db.execute(
+        """
+        SELECT
+          SUM(CASE WHEN waitlist_position IS NULL THEN 1 ELSE 0 END) AS confirmed_count,
+          SUM(CASE WHEN waitlist_position IS NOT NULL THEN 1 ELSE 0 END) AS waitlist_count
+        FROM tournament_entry
+        WHERE tournament_id = ?
+        """,
+        (tournament_id,),
+    ).fetchone()
+    return {
+        "confirmed_count": int(rows["confirmed_count"] or 0),
+        "waitlist_count": int(rows["waitlist_count"] or 0),
+    }
+
+
+def next_waitlist_position(db, tournament_id: int) -> int:
+    row = db.execute(
+        "SELECT COALESCE(MAX(waitlist_position), 0) + 1 AS next_position FROM tournament_entry WHERE tournament_id = ?",
+        (tournament_id,),
+    ).fetchone()
+    return int(row["next_position"])
+
+
+def compact_waitlist(db, tournament_id: int):
+    rows = db.execute(
+        """
+        SELECT id
+        FROM tournament_entry
+        WHERE tournament_id = ? AND waitlist_position IS NOT NULL
+        ORDER BY waitlist_position ASC, registration_order ASC, id ASC
+        """,
+        (tournament_id,),
+    ).fetchall()
+    for position, row in enumerate(rows, start=1):
+        db.execute("UPDATE tournament_entry SET waitlist_position = ? WHERE id = ?", (position, row["id"]))
+    db.commit()
+
+
+def promote_next_waitlisted_entry(db, tournament_id: int) -> int | None:
+    row = db.execute(
+        """
+        SELECT id
+        FROM tournament_entry
+        WHERE tournament_id = ? AND waitlist_position IS NOT NULL
+        ORDER BY waitlist_position ASC, registration_order ASC, id ASC
+        LIMIT 1
+        """,
+        (tournament_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    db.execute(
+        "UPDATE tournament_entry SET is_active = 0, waitlist_position = NULL WHERE id = ?",
+        (row["id"],),
+    )
+    db.commit()
+    compact_waitlist(db, tournament_id)
+    return row["id"]
+
+
 def ensure_round_status_rows(db, tournament_id: int, rounds_planned: int):
     entries = db.execute(
         "SELECT id FROM tournament_entry WHERE tournament_id = ?",
         (tournament_id,),
     ).fetchall()
+    for entry in entries:
+        ensure_entry_round_status_rows(db, entry["id"], rounds_planned)
+
+
+def ensure_entry_round_status_rows(db, entry_id: int, rounds_planned: int, available_from_round: int = 1):
     existing = {
-        (row["entry_id"], row["round_no"])
+        row["round_no"]
         for row in db.execute(
-            """
-            SELECT entry_id, round_no
-            FROM entry_round_status
-            WHERE entry_id IN (
-                SELECT id FROM tournament_entry WHERE tournament_id = ?
-            )
-            """,
-            (tournament_id,),
+            "SELECT round_no FROM entry_round_status WHERE entry_id = ?",
+            (entry_id,),
         ).fetchall()
     }
     inserts = []
-    for entry in entries:
-        for round_no in range(1, rounds_planned + 1):
-            key = (entry["id"], round_no)
-            if key not in existing:
-                inserts.append((entry["id"], round_no, 1))
+    for round_no in range(1, rounds_planned + 1):
+        if round_no in existing:
+            continue
+        inserts.append((entry_id, round_no, 1 if round_no >= available_from_round else 0))
     if inserts:
         db.executemany(
             "INSERT INTO entry_round_status (entry_id, round_no, is_available) VALUES (?, ?, ?)",
@@ -196,10 +357,15 @@ def fetch_entries(db, tournament_id: int):
           e.seed_rating,
           e.member_status,
           e.is_active,
+          e.registration_source,
+          e.registration_order,
+          e.registration_answers_json,
+          e.waitlist_position,
           e.final_rank,
           e.final_score,
           e.final_primary_tiebreak,
           e.final_secondary_tiebreak,
+          e.created_at,
           p.name AS player_name,
           p.email AS player_email,
           p.canonical_rating_name,
@@ -211,7 +377,12 @@ def fetch_entries(db, tournament_id: int):
         FROM tournament_entry e
         JOIN player p ON p.id = e.player_id
         WHERE e.tournament_id = ?
-        ORDER BY COALESCE(e.final_rank, 999999), e.seed_rating DESC, e.imported_name COLLATE NOCASE ASC
+        ORDER BY
+          CASE WHEN e.waitlist_position IS NULL THEN 0 ELSE 1 END,
+          COALESCE(e.waitlist_position, 0),
+          COALESCE(e.final_rank, 999999),
+          e.seed_rating DESC,
+          e.imported_name COLLATE NOCASE ASC
         """,
         (tournament_id,),
     ).fetchall()
@@ -321,6 +492,18 @@ def _result_points(result_code: str, side: str) -> float:
     return white_points if side == "white" else black_points
 
 
+def result_points_label(result_code: str | None, side: str) -> str | None:
+    normalized = normalize_result_code(result_code)
+    if normalized is None:
+        return None
+    if normalized == "BYE":
+        return "1"
+    points = _result_points(normalized, side)
+    if points == int(points):
+        return str(int(points))
+    return f"{points:.1f}".rstrip("0").rstrip(".")
+
+
 def latest_paired_round(db, tournament_id: int) -> int | None:
     row = db.execute(
         "SELECT MAX(round_no) AS max_round FROM pairing WHERE tournament_id = ?",
@@ -341,23 +524,40 @@ def public_rounds(db, tournament_id: int) -> list[int]:
 
 def set_active_tournament(db, tournament_id: int):
     db.execute("UPDATE tournament SET is_active_public = 0")
-    db.execute("UPDATE tournament SET is_active_public = 1 WHERE id = ?", (tournament_id,))
+    db.execute(
+        "UPDATE tournament SET is_active_public = 1, is_public = 1 WHERE id = ?",
+        (tournament_id,),
+    )
     db.commit()
 
 
-def compute_standings(db, tournament_id: int, through_round: int | None = None) -> list[dict]:
+def unset_active_tournament(db, tournament_id: int):
+    db.execute("UPDATE tournament SET is_active_public = 0 WHERE id = ?", (tournament_id,))
+    db.commit()
+
+
+def compute_standings(
+    db,
+    tournament_id: int,
+    through_round: int | None = None,
+    prefer_stored: bool = True,
+) -> list[dict]:
     tournament = db.execute(
         """
-        SELECT is_historical, primary_tiebreak_label, secondary_tiebreak_label
+        SELECT status, is_historical, primary_tiebreak_label, secondary_tiebreak_label
         FROM tournament
         WHERE id = ?
         """,
         (tournament_id,),
     ).fetchone()
     entries = fetch_entries(db, tournament_id)
-    pairings = fetch_pairings(db, tournament_id)
 
-    if through_round is None and tournament and tournament["is_historical"]:
+    if (
+        through_round is None
+        and prefer_stored
+        and tournament
+        and (tournament["is_historical"] or tournament["status"] == "completed")
+    ):
         historical_rows = [
             entry
             for entry in entries
@@ -389,6 +589,8 @@ def compute_standings(db, tournament_id: int, through_round: int | None = None) 
                     }
                 )
             return ordered
+
+    pairings = fetch_pairings(db, tournament_id)
 
     rows = {}
     for entry in entries:
@@ -461,6 +663,29 @@ def compute_standings(db, tournament_id: int, through_round: int | None = None) 
     return ordered
 
 
+def persist_final_standings(db, tournament_id: int):
+    standings = compute_standings(db, tournament_id, prefer_stored=False)
+    standings_by_entry = {row["entry_id"]: row for row in standings}
+    entries = fetch_entries(db, tournament_id)
+    updates = []
+    for entry in entries:
+        row = standings_by_entry.get(entry["id"])
+        if row is None:
+            updates.append((None, None, None, None, entry["id"]))
+            continue
+        updates.append((row["rank"], row["score"], row["bh"], row["bh_c1"], entry["id"]))
+    if updates:
+        db.executemany(
+            """
+            UPDATE tournament_entry
+            SET final_rank = ?, final_score = ?, final_primary_tiebreak = ?, final_secondary_tiebreak = ?
+            WHERE id = ?
+            """,
+            updates,
+        )
+        db.commit()
+
+
 def _desired_color(row: dict) -> str | None:
     balance = row["white_games"] - row["black_games"]
     if balance > 0:
@@ -487,7 +712,7 @@ def _assignment_penalty(row: dict, color: str) -> float:
 
 
 def _pair_penalty(a: dict, b: dict) -> float:
-    repeat_penalty = 100 if b["entry_id"] in a["opponent_ids"] else 0
+    repeat_penalty = 100 if b["entry_id"] in a["opponent_ids"] or a["entry_id"] in b["opponent_ids"] else 0
     score_penalty = abs(a["score"] - b["score"]) * 25
     seed_penalty = abs(a["seed_rating"] - b["seed_rating"]) / 100
     return repeat_penalty + score_penalty + seed_penalty
@@ -501,16 +726,53 @@ def _choose_colors(a: dict, b: dict) -> tuple[dict, dict]:
     return b, a
 
 
+def _pair_group_matching(group: list[dict], allow_repeats: bool) -> list[tuple[dict, dict]] | None:
+    if len(group) % 2 == 1:
+        return None
+    rows_by_id = {row["entry_id"]: row for row in group}
+    ordered_ids = tuple(row["entry_id"] for row in group)
+
+    @lru_cache(maxsize=None)
+    def search(remaining_ids: tuple[int, ...]) -> tuple[tuple[int, int], ...] | None:
+        if not remaining_ids:
+            return ()
+        current_id = remaining_ids[0]
+        current = rows_by_id[current_id]
+        candidates = [
+            candidate_id
+            for candidate_id in remaining_ids[1:]
+            if allow_repeats or candidate_id not in current["opponent_ids"]
+        ]
+        candidates.sort(
+            key=lambda candidate_id: (
+                _pair_penalty(current, rows_by_id[candidate_id]),
+                -rows_by_id[candidate_id]["score"],
+                -rows_by_id[candidate_id]["seed_rating"],
+                rows_by_id[candidate_id]["name"].lower(),
+            )
+        )
+        for candidate_id in candidates:
+            rest_ids = tuple(entry_id for entry_id in remaining_ids[1:] if entry_id != candidate_id)
+            suffix = search(rest_ids)
+            if suffix is not None:
+                return ((current_id, candidate_id),) + suffix
+        return None
+
+    pairs = search(ordered_ids)
+    if pairs is None:
+        return None
+    return [tuple(rows_by_id[entry_id] for entry_id in pair) for pair in pairs]
+
+
 def _pair_group(group: list[dict]) -> list[tuple[dict, dict]]:
-    remaining = list(group)
-    pairs = []
-    while remaining:
-        current = remaining.pop(0)
-        opponent = min(remaining, key=lambda candidate: _pair_penalty(current, candidate))
-        remaining.remove(opponent)
-        white, black = _choose_colors(current, opponent)
-        pairs.append((white, black))
-    return pairs
+    pairs = _pair_group_matching(group, allow_repeats=False)
+    if pairs is None:
+        pairs = _pair_group_matching(group, allow_repeats=True) or []
+    colored_pairs = []
+    for first, second in pairs:
+        white, black = _choose_colors(first, second)
+        colored_pairs.append((white, black))
+    return colored_pairs
 
 
 def generate_swiss_pairings(db, tournament_id: int, round_no: int) -> list[dict]:
@@ -564,7 +826,13 @@ def generate_swiss_pairings(db, tournament_id: int, round_no: int) -> list[dict]
                 group.insert(0, carry)
                 carry = None
             if len(group) % 2 == 1:
-                carry = sorted(group, key=lambda row: (row["seed_rating"], row["name"].lower()))[0]
+                ordered_carry_candidates = sorted(group, key=lambda row: (row["seed_rating"], row["name"].lower()))
+                carry = ordered_carry_candidates[0]
+                for candidate in ordered_carry_candidates:
+                    remaining = [row for row in group if row["entry_id"] != candidate["entry_id"]]
+                    if _pair_group_matching(remaining, allow_repeats=False) is not None:
+                        carry = candidate
+                        break
                 group = [row for row in group if row["entry_id"] != carry["entry_id"]]
             for white, black in _pair_group(group):
                 boards.append(
@@ -632,6 +900,10 @@ def parse_manual_pairing_form(form, active_entry_ids: set[int], board_count: int
             if black_id in seen:
                 raise ValueError("A player was assigned to multiple boards.")
             seen.add(black_id)
+            if result_code == "BYE":
+                raise ValueError("Use BYE only for boards without an opponent.")
+        elif result_code not in {None, "BYE"}:
+            raise ValueError("Boards without an opponent can only use the BYE result.")
         boards.append(
             {
                 "board_no": board_no,
@@ -711,29 +983,33 @@ def upsert_player(db, row: dict, match: MatchResult):
     return player["id"]
 
 
-def attach_entries_to_tournament(db, tournament_id: int, imported_rows: list[dict], matcher):
+def attach_entries_to_tournament(db, tournament_id: int, imported_rows: list[dict], matcher, default_active: bool = False):
     tournament = db.execute(
         "SELECT rounds_planned FROM tournament WHERE id = ?",
         (tournament_id,),
     ).fetchone()
+    cutoff_round = (latest_paired_round(db, tournament_id) or 0) + 1
     for row in imported_rows:
         match = matcher(row["name"], row.get("declared_rating"))
         player_id = upsert_player(db, row, match)
-        seed_rating = int(round(match.historical_rating or row.get("declared_rating") or 1500))
+        seed_rating = round_rating_value(match.historical_rating or row.get("declared_rating") or 1500, default=1500)
+        existing_entry = db.execute(
+            "SELECT id FROM tournament_entry WHERE tournament_id = ? AND player_id = ?",
+            (tournament_id, player_id),
+        ).fetchone()
         db.execute(
             """
             INSERT INTO tournament_entry (
               tournament_id, player_id, imported_name, imported_email, submitted_at,
-              declared_rating, seed_rating, member_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              declared_rating, seed_rating, member_status, is_active
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(tournament_id, player_id) DO UPDATE SET
               imported_name = excluded.imported_name,
               imported_email = excluded.imported_email,
               submitted_at = excluded.submitted_at,
               declared_rating = excluded.declared_rating,
               seed_rating = excluded.seed_rating,
-              member_status = excluded.member_status,
-              is_active = 1
+              member_status = excluded.member_status
             """,
             (
                 tournament_id,
@@ -744,10 +1020,20 @@ def attach_entries_to_tournament(db, tournament_id: int, imported_rows: list[dic
                 row["declared_rating"],
                 seed_rating,
                 match.member_status,
+                1 if default_active else 0,
             ),
         )
+        entry_id = db.execute(
+            "SELECT id FROM tournament_entry WHERE tournament_id = ? AND player_id = ?",
+            (tournament_id, player_id),
+        ).fetchone()["id"]
+        ensure_entry_round_status_rows(
+            db,
+            entry_id,
+            tournament["rounds_planned"],
+            available_from_round=1 if existing_entry is not None else cutoff_round,
+        )
     db.commit()
-    ensure_round_status_rows(db, tournament_id, tournament["rounds_planned"])
 
 
 def pairings_complete(db, tournament_id: int, round_no: int) -> bool:
@@ -755,11 +1041,14 @@ def pairings_complete(db, tournament_id: int, round_no: int) -> bool:
     return bool(rows) and all(normalize_result_code(row["result_code"]) is not None for row in rows)
 
 
-def next_round_to_pair(db, tournament_id: int, rounds_planned: int) -> int:
+def next_round_to_pair(db, tournament_id: int, rounds_planned: int) -> int | None:
     for round_no in range(1, rounds_planned + 1):
-        if not fetch_pairings(db, tournament_id, round_no):
+        pairings = fetch_pairings(db, tournament_id, round_no)
+        if not pairings:
             return round_no
-    return rounds_planned
+        if not pairings_complete(db, tournament_id, round_no):
+            return None
+    return None
 
 
 def serialize_csv(frame) -> str:

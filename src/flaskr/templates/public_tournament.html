@@ -4,13 +4,83 @@
 <section class="section">
   <p class="kicker">{% if show_as_home %}Current Tournament{% elif tournament.is_historical %}Past Tournament{% else %}Tournament{% endif %}</p>
   <h1>{{ tournament.name }}</h1>
-  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds</p>
+  <p class="lede">
+    {{ tournament.event_date }}
+    {% if tournament.event_time %} · {{ tournament.event_time }}{% endif %}
+    {% if tournament.venue %} · {{ tournament.venue }}{% endif %}
+    · {{ tournament.rounds_planned }} rounds
+  </p>
 </section>
 
-<section class="section grid two-col">
-  <div>
+{% if tournament.status == "completed" and podium %}
+  <section class="section">
     <div class="section-heading">
-      <h2>{% if selected_round %}Round {{ selected_round }}{% else %}Boards{% endif %}</h2>
+      <h2>Final Highlights</h2>
+    </div>
+    <div class="podium-stage">
+      {% if podium|length >= 2 %}
+        {% set second = podium[1] %}
+        <article class="podium-slot podium-slot-second">
+          <small>2nd</small>
+          <strong><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=second.entry_id) }}">{{ second.name }}</a></strong>
+          <span>{{ "%.1f"|format(second.score) }}</span>
+        </article>
+      {% endif %}
+      {% set first = podium[0] %}
+      <article class="podium-slot podium-slot-first">
+        <small>1st</small>
+        <strong><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=first.entry_id) }}">{{ first.name }}</a></strong>
+        <span>{{ "%.1f"|format(first.score) }}</span>
+      </article>
+      {% if podium|length >= 3 %}
+        {% set third = podium[2] %}
+        <article class="podium-slot podium-slot-third">
+          <small>3rd</small>
+          <strong><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=third.entry_id) }}">{{ third.name }}</a></strong>
+          <span>{{ "%.1f"|format(third.score) }}</span>
+        </article>
+      {% endif %}
+    </div>
+    {% if tournament_insights and (tournament_insights.above_level or tournament_insights.biggest_upset) %}
+      <div class="highlight-grid">
+        {% if tournament_insights.above_level %}
+          <article class="highlight-card">
+            <small>Played Above Level</small>
+            <strong>{{ tournament_insights.above_level.name }}</strong>
+            <span>
+              Performance {{ tournament_insights.above_level.performance_rating }}
+              vs {{ tournament_insights.above_level.start_rating }}
+            </span>
+            <span>{{ "%.1f"|format(tournament_insights.above_level.probability * 100) }}% tail probability</span>
+          </article>
+        {% endif %}
+        {% if tournament_insights.biggest_upset %}
+          <article class="highlight-card">
+            <small>Most Unlikely Win</small>
+            <strong>{{ tournament_insights.biggest_upset.winner }}</strong>
+            <span>beat {{ tournament_insights.biggest_upset.loser }} ({{ tournament_insights.biggest_upset.result }})</span>
+            <span>{{ "%.1f"|format(tournament_insights.biggest_upset.win_probability * 100) }}% win probability</span>
+          </article>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+
+<section class="section">
+  <nav class="tab-row">
+    {% if selected_round %}
+      <a class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='boards') }}">Rounds</a>
+      <a class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='standings') }}">Standings</a>
+    {% else %}
+      <a class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament', slug=tournament.slug, view='boards') }}">Rounds</a>
+      <a class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament', slug=tournament.slug, view='standings') }}">Standings</a>
+    {% endif %}
+  </nav>
+
+  {% if view_mode == "boards" %}
+    <div class="section-heading">
+      <h2>{% if selected_round %}Round {{ selected_round }}{% else %}Rounds{% endif %}</h2>
       {% if latest_round %}
         <small>Latest published round: {{ latest_round }}</small>
       {% endif %}
@@ -18,54 +88,51 @@
     {% if round_numbers %}
       <nav class="tab-row">
         {% for round_no in round_numbers %}
-          <a class="{% if round_no == selected_round %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=round_no) }}">Round {{ round_no }}</a>
+          <a class="{% if round_no == selected_round %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=round_no, view='boards') }}">Round {{ round_no }}</a>
         {% endfor %}
       </nav>
     {% endif %}
     {% if pairings %}
       <div class="table-wrap">
-        <table>
+        <table class="public-boards-table">
           <thead>
             <tr>
               <th>Board</th>
-              <th>White</th>
-              <th>Black</th>
-              <th>Result</th>
+              <th class="public-player-col public-player-col-white">White</th>
+              <th class="align-center public-result-col">Result</th>
+              <th class="public-player-col public-player-col-black">Black</th>
             </tr>
           </thead>
           <tbody>
             {% for pairing in pairings %}
               <tr>
                 <td>{{ pairing.board_no }}</td>
-                <td>
+                <td class="public-player-col public-player-col-white">
                   {% if pairing.white_entry_id %}
                     <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.white_entry_id) }}">{{ pairing.white_name }}</a>
                   {% else %}
                     -
                   {% endif %}
                 </td>
-                <td>
+                <td class="align-center public-result-col">{{ pairing.result_code or "Pending" }}</td>
+                <td class="public-player-col public-player-col-black">
                   {% if pairing.black_entry_id %}
                     <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.black_entry_id) }}">{{ pairing.black_name }}</a>
                   {% else %}
                     Bye
                   {% endif %}
                 </td>
-                <td>{{ pairing.result_code or "Pending" }}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% else %}
-      <p class="muted">Boards will appear here once a round has been generated.</p>
+      <p class="muted">Rounds will appear here once one has been published.</p>
     {% endif %}
-  </div>
-
-  <div>
+  {% else %}
     <div class="section-heading">
       <h2>Standings</h2>
-      <small>{{ tournament.primary_tiebreak_label }} / {{ tournament.secondary_tiebreak_label }}</small>
     </div>
     <div class="table-wrap">
       <table>
@@ -73,6 +140,7 @@
           <tr>
             <th>Rank</th>
             <th>Player</th>
+            <th>Rating</th>
             <th>Score</th>
             <th>{{ tournament.primary_tiebreak_label }}</th>
             <th>{{ tournament.secondary_tiebreak_label }}</th>
@@ -82,34 +150,34 @@
           {% for row in standings %}
             <tr>
               <td>{{ row.rank }}</td>
-              <td>{{ row.name }}</td>
-              <td>{{ row.score }}</td>
-              <td>{{ row.bh }}</td>
-              <td>{{ row.bh_c1 }}</td>
+              <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=row.entry_id) }}">{{ row.name }}</a></td>
+              <td>{{ row.seed_rating }}</td>
+              <td>{{ "%.1f"|format(row.score) }}</td>
+              <td>{{ "%.1f"|format(row.bh) }}</td>
+              <td>{{ "%.1f"|format(row.bh_c1) }}</td>
             </tr>
           {% else %}
             <tr>
-              <td colspan="5" class="muted">No standings yet.</td>
+              <td colspan="6" class="muted">No standings yet.</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
-  </div>
+  {% endif %}
 </section>
 
 <section class="section">
-  <div class="section-heading">
-    <h2>Past Tournaments</h2>
-    <a href="{{ url_for('web.archive') }}">Open archive</a>
-  </div>
-  <div class="link-list">
-    {% for item in archive %}
-      <a href="{{ url_for('web.public_tournament', slug=item.slug) }}" class="{% if item.slug == tournament.slug %}is-current{% endif %}">
-        <span>{{ item.name }}</span>
-        <small>{{ item.event_date }}</small>
-      </a>
-    {% endfor %}
-  </div>
+  <details class="inline-details archive-disclosure">
+    <summary>Past tournaments</summary>
+    <div class="link-list archive-dropdown">
+      {% for item in archive %}
+        <a href="{{ url_for('web.public_tournament', slug=item.slug) }}" class="{% if item.slug == tournament.slug %}is-current{% endif %}">
+          <span>{{ item.name }}</span>
+          <small>{{ item.event_date }}</small>
+        </a>
+      {% endfor %}
+    </div>
+  </details>
 </section>
 {% endblock %}

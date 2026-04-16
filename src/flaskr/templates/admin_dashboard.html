@@ -5,118 +5,48 @@
   <div class="section-heading">
     <div>
       <p class="kicker">Admin</p>
-      <h1>Tournament desk</h1>
+      <h1>Tournament Desk</h1>
     </div>
     <form method="post" action="{{ url_for('web.admin_logout') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="secondary">Sign out</button>
     </form>
   </div>
-  <p class="lede">Active public tournament: <strong>{{ active_tournament.name if active_tournament else "none" }}</strong></p>
+  <nav class="tab-row dashboard-tabs">
+    <a href="{{ url_for('web.admin', tab='create') }}" class="{% if active_tab == 'create' %}is-active{% endif %}">Create Tournament</a>
+    <a href="{{ url_for('web.admin', tab='tournaments') }}" class="{% if active_tab == 'tournaments' %}is-active{% endif %}">Tournaments</a>
+    <a href="{{ url_for('web.admin', tab='members') }}" class="{% if active_tab == 'members' %}is-active{% endif %}">Member Database</a>
+    <a href="{{ url_for('web.admin', tab='password') }}" class="{% if active_tab == 'password' %}is-active{% endif %}">Change Password</a>
+  </nav>
 </section>
 
-<section class="section grid two-col">
-  <div>
-    <div class="section-heading">
-      <h2>Create tournament</h2>
-    </div>
-    <form method="post" action="{{ url_for('web.create_tournament') }}" enctype="multipart/form-data" class="stack-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label>
-        Name
-        <input type="text" name="name" placeholder="Easter Tournament 2026" required>
-      </label>
-      <label>
-        Date
-        <input type="date" name="event_date" required>
-      </label>
-      <label>
-        Rounds
-        <input type="number" name="rounds_planned" min="1" max="15" value="7" required>
-      </label>
-      <label>
-        Registration CSV
-        <input type="file" name="registrations" accept=".csv">
-      </label>
-      <button type="submit">Create tournament</button>
-    </form>
+<section class="section"{% if active_tab != 'create' %} hidden{% endif %}>
+  <div class="section-heading">
+    <h2>Create tournament</h2>
   </div>
-
-  <div>
-    <div class="section-heading">
-      <h2>Ratings</h2>
-    </div>
-    <p><strong>Imported:</strong> {{ "Yes" if rating.ready else "No" }}</p>
-    <p><strong>Historical tournaments:</strong> {{ rating.historical_count }}</p>
-    <div class="inline-actions">
-      <form method="post" action="{{ url_for('web.rebuild_ratings') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit">Rebuild ratings</button>
-      </form>
-      <form method="post" action="{{ url_for('web.sync_history') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="secondary">Sync past tournaments</button>
-      </form>
-    </div>
-  </div>
+  <form method="post" action="{{ url_for('web.create_tournament') }}" enctype="multipart/form-data" class="stack-form section-narrow-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>
+      Name
+      <input type="text" name="name" placeholder="Easter Tournament 2026" required>
+    </label>
+    <label>
+      Date
+      <input type="date" name="event_date" required>
+    </label>
+    <label>
+      Rounds
+      <input type="number" name="rounds_planned" min="1" max="15" value="7" required>
+    </label>
+    <label>
+      Registration CSV
+      <input type="file" name="registrations" accept=".csv">
+    </label>
+    <button type="submit">Create tournament</button>
+  </form>
 </section>
 
-<section class="section grid two-col">
-  <div>
-    <div class="section-heading">
-      <h2>Admin password</h2>
-    </div>
-    <form method="post" action="{{ url_for('web.admin_password') }}" class="stack-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label>
-        Current password
-        <input type="password" name="current_password" autocomplete="current-password" required>
-      </label>
-      <label>
-        New password
-        <input type="password" name="new_password" autocomplete="new-password" minlength="10" required>
-      </label>
-      <label>
-        Repeat new password
-        <input type="password" name="confirm_password" autocomplete="new-password" minlength="10" required>
-      </label>
-      <button type="submit">Change password</button>
-    </form>
-  </div>
-
-  <div>
-    <div class="section-heading">
-      <h2>Top 20</h2>
-      <a href="{{ url_for('web.ratings') }}">Full leaderboard</a>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Rank</th>
-            <th>Name</th>
-            <th>Rating</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in leaderboard %}
-            <tr>
-              <td>{{ row.Rank }}</td>
-              <td>{{ row.Name }}</td>
-              <td>{{ row.Rating }}</td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="3" class="muted">No leaderboard available yet.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
-
-<section class="section">
+<section class="section"{% if active_tab != 'tournaments' %} hidden{% endif %}>
   <div class="section-heading">
     <h2>Tournaments</h2>
   </div>
@@ -131,4 +61,110 @@
     {% endfor %}
   </div>
 </section>
+
+<section class="section"{% if active_tab != 'members' %} hidden{% endif %}>
+  <div class="section-heading">
+    <h2>Member database</h2>
+  </div>
+  <div data-member-directory-root>
+    <div class="member-directory-toolbar">
+      <form method="post" action="{{ url_for('web.update_member_cutoff') }}" class="stack-form compact-form compact-form-wide member-toolbar-form member-cutoff-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="members_page" value="{{ members_page }}">
+        <input type="hidden" name="member_q" value="{{ member_query }}">
+        <label>
+          Count members from
+          <input type="date" name="member_since_date" value="{{ member_cutoff }}" required>
+        </label>
+        <button type="submit">Update date</button>
+      </form>
+      <form method="get" action="{{ url_for('web.admin') }}" class="stack-form compact-form compact-form-wide member-toolbar-form member-search-form" data-member-search>
+        <input type="hidden" name="tab" value="members">
+        <label>
+          Find by name
+          <input type="search" name="member_q" value="{{ member_query }}" autocomplete="off">
+        </label>
+      </form>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Rating</th>
+            <th>First played</th>
+            <th>Last played</th>
+            <th>Games</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for member in members %}
+            <tr data-member-row>
+              <td>{{ member.name }}</td>
+              <td>{{ member.rating or "—" }}</td>
+              <td>{{ member.first_played }}</td>
+              <td>{{ member.last_played }}</td>
+              <td>{{ member.games_played }}</td>
+              <td>
+                <form method="post" action="{{ url_for('web.update_member_status', player_id=member.id) }}" data-member-status-form>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="members_page" value="{{ members_page }}">
+                  <input type="hidden" name="member_q" value="{{ member_query }}">
+                  <input type="hidden" name="is_member" value="{{ 0 if member.member else 1 }}" data-member-next-value>
+                  <button type="submit" class="status-pill {{ 'status-on' if member.member else 'status-off' }}" data-member-status-button>
+                    {{ "active" if member.member else "inactive" }}
+                  </button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="6" class="muted">{% if member_query %}No members match that name.{% else %}No played tournament games yet.{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if members_total_pages > 1 %}
+      <nav class="pagination-row">
+        {% if members_page > 1 %}
+          <a href="{{ url_for('web.admin', tab='members', members_page=members_page - 1, member_q=member_query) }}" class="pagination-link">Previous</a>
+        {% endif %}
+        {% for page_no in range(1, members_total_pages + 1) %}
+          <a href="{{ url_for('web.admin', tab='members', members_page=page_no, member_q=member_query) }}" class="pagination-link {% if page_no == members_page %}is-active{% endif %}">{{ page_no }}</a>
+        {% endfor %}
+        {% if members_page < members_total_pages %}
+          <a href="{{ url_for('web.admin', tab='members', members_page=members_page + 1, member_q=member_query) }}" class="pagination-link">Next</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section"{% if active_tab != 'password' %} hidden{% endif %}>
+  <div class="section-heading">
+    <h2>Change password</h2>
+  </div>
+  <form method="post" action="{{ url_for('web.admin_password') }}" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>
+      Current password
+      <input type="password" name="current_password" autocomplete="current-password" required>
+    </label>
+    <label>
+      New password
+      <input type="password" name="new_password" autocomplete="new-password" minlength="10" required>
+    </label>
+    <label>
+      Repeat new password
+      <input type="password" name="confirm_password" autocomplete="new-password" minlength="10" required>
+    </label>
+    <button type="submit">Change password</button>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 {% endblock %}

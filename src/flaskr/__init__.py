@@ -27,7 +27,16 @@ def _load_secret_key(instance_path: str, explicit_key: str | None) -> str:
 
 def create_app(test_config: dict | None = None) -> Flask:
     project_root = Path(__file__).resolve().parents[2]
-    app = Flask(__name__, instance_path=str(project_root / "instance"), instance_relative_config=True)
+    configured_instance_path = os.environ.get("CHESS_INSTANCE_PATH")
+    if test_config is not None and test_config.get("INSTANCE_PATH"):
+        configured_instance_path = str(Path(test_config["INSTANCE_PATH"]))
+    if configured_instance_path:
+        configured_instance_path = str(Path(configured_instance_path).expanduser().resolve())
+    app = Flask(
+        __name__,
+        instance_path=configured_instance_path or str(project_root / "instance"),
+        instance_relative_config=True,
+    )
     instance_root = Path(app.instance_path)
     instance_root.mkdir(parents=True, exist_ok=True)
     app.config.from_mapping(
@@ -35,6 +44,18 @@ def create_app(test_config: dict | None = None) -> Flask:
         DATABASE=str(instance_root / "chess.db"),
         RATING_DATA_DIR=str(instance_root / "rating"),
         EXPORT_DIR=str(instance_root / "exports"),
+        PUBLIC_BASE_URL=os.environ.get("CHESS_PUBLIC_BASE_URL", "http://127.0.0.1:5000"),
+        MAIL_ENABLED=os.environ.get("CHESS_MAIL_ENABLED", "").lower() in {"1", "true", "yes"},
+        MAIL_HOST=os.environ.get("CHESS_MAIL_HOST"),
+        MAIL_PORT=int(os.environ.get("CHESS_MAIL_PORT", "587")),
+        MAIL_USERNAME=os.environ.get("CHESS_MAIL_USERNAME"),
+        MAIL_PASSWORD=os.environ.get("CHESS_MAIL_PASSWORD"),
+        MAIL_USE_TLS=os.environ.get("CHESS_MAIL_USE_TLS", "1").lower() in {"1", "true", "yes"},
+        MAIL_USE_SSL=os.environ.get("CHESS_MAIL_USE_SSL", "").lower() in {"1", "true", "yes"},
+        MAIL_FROM_EMAIL=os.environ.get("CHESS_MAIL_FROM_EMAIL"),
+        MAIL_FROM_NAME=os.environ.get("CHESS_MAIL_FROM_NAME", "ETH Chess"),
+        MAIL_REPLY_TO=os.environ.get("CHESS_MAIL_REPLY_TO"),
+        MAIL_SUPPRESS_SEND=False,
         SESSION_COOKIE_SECURE=os.environ.get("CHESS_SECURE_COOKIES", "").lower() in {"1", "true", "yes"},
         TRUST_PROXY_HEADERS=os.environ.get("CHESS_TRUST_PROXY", "1").lower() in {"1", "true", "yes"},
     )
@@ -53,5 +74,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     with app.app_context():
         db.ensure_db()
         auth.ensure_admin_password("admin")
+        rating_integration.get_member_since_date(db.get_db())
+        rating_integration.sync_member_statuses(db.get_db())
 
     return app

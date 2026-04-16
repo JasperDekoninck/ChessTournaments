@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 *.egg-info/
-instance/
+instance/*
+instance/.secret_key
+instance/exports/
+instance/rating/
+local-test-instance/.secret_key
+.local-test-run/
 src/instance/
 .codex

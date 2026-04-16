@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from datetime import timedelta
 from functools import wraps
-
+from pathlib import Path
 import click
 from flask import abort, current_app, flash, g, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -12,6 +12,44 @@ from .db import get_db
 
 
 ADMIN_HASH_KEY = "admin_password_hash"
+
+
+def _legacy_admin_hash_path() -> Path:
+    return Path(current_app.instance_path) / ".admin_password_hash"
+
+
+def _read_legacy_admin_hash_file() -> str | None:
+    path = _legacy_admin_hash_path()
+    if not path.exists():
+        return None
+    value = path.read_text(encoding="utf-8").strip()
+    return value or None
+
+
+def _delete_legacy_admin_hash_file():
+    path = _legacy_admin_hash_path()
+    if path.exists():
+        path.unlink()
+
+
+def _read_admin_hash_db() -> str | None:
+    row = get_db().execute("SELECT value FROM app_config WHERE key = ?", (ADMIN_HASH_KEY,)).fetchone()
+    if row is None:
+        return None
+    return row["value"]
+
+
+def _write_admin_hash_db(password_hash: str):
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO app_config(key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (ADMIN_HASH_KEY, password_hash),
+    )
+    db.commit()
 
 
 def _csrf_token() -> str:
@@ -27,35 +65,25 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str) -> bool:
-    row = get_db().execute("SELECT value FROM app_config WHERE key = ?", (ADMIN_HASH_KEY,)).fetchone()
-    return bool(row) and check_password_hash(row["value"], password)
+    stored_hash = _read_admin_hash_db()
+    return bool(stored_hash) and check_password_hash(stored_hash, password)
 
 
 def ensure_admin_password(default_password: str = "admin"):
-    db = get_db()
-    row = db.execute("SELECT value FROM app_config WHERE key = ?", (ADMIN_HASH_KEY,)).fetchone()
-    if row is not None:
+    if _read_admin_hash_db() is not None:
+        _delete_legacy_admin_hash_file()
         return
-    db.execute(
-        """
-        INSERT INTO app_config (key, value) VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """,
-        (ADMIN_HASH_KEY, hash_password(default_password)),
-    )
-    db.commit()
+    legacy_hash = _read_legacy_admin_hash_file()
+    if legacy_hash:
+        _write_admin_hash_db(legacy_hash)
+        _delete_legacy_admin_hash_file()
+        return
+    _write_admin_hash_db(hash_password(default_password))
 
 
 def set_admin_password(password: str):
-    db = get_db()
-    db.execute(
-        """
-        INSERT INTO app_config (key, value) VALUES (?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-        """,
-        (ADMIN_HASH_KEY, hash_password(password)),
-    )
-    db.commit()
+    _write_admin_hash_db(hash_password(password))
+    _delete_legacy_admin_hash_file()
 
 
 def login_required(view):

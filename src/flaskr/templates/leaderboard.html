@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Anonymous Leaderboard{% endblock %}
+{% block title %}Leaderboard{% endblock %}
 {% block content %}
 <section class="section">
   <p class="kicker">Leaderboard</p>
-  <h1>Anonymous club leaderboard</h1>
-  <p class="lede">Current rating table rebuilt locally from the integrated rating engine.</p>
+  <h1>Leaderboard</h1>
+  <p class="lede">Current club ranking rebuilt locally from the integrated rating engine.</p>
 </section>
 
 <section class="section">
   <div class="section-heading">
-    <h2>Ratings</h2>
+    <h2>Players</h2>
     <a href="{{ url_for('web.export_anonymous_leaderboard') }}">CSV</a>
   </div>
   <div class="table-wrap">
@@ -28,7 +28,13 @@
         {% for row in leaderboard %}
           <tr>
             <td>{{ row.Rank }}</td>
-            <td>{{ row.Name }}</td>
+            <td>
+              {% if row.Name != "Anonymous" %}
+                <a href="{{ url_for('web.leaderboard_player', player_name=row.Name) }}">{{ row.Name }}</a>
+              {% else %}
+                {{ row.Name }}
+              {% endif %}
+            </td>
             <td>{{ row.Rating }}</td>
             <td>{{ row.Wins }}</td>
             <td>{{ row.Losses }}</td>

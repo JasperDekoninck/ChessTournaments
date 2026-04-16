@@ -8,20 +8,23 @@
       <h1>{{ tournament.name }}</h1>
     </div>
     <div class="inline-actions">
-      <a class="button-link secondary" href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">Public view</a>
+      <a class="button-link secondary" href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">{{ "Preview public page" if not tournament.is_public else "Public view" }}</a>
       <a class="button-link secondary" href="{{ url_for('web.export_tournament', slug=tournament.slug) }}">CSV export</a>
     </div>
   </div>
-  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds · {{ tournament.status }}</p>
+  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds · {{ tournament.status }}{% if not tournament.is_public %} · private draft{% elif tournament.is_active_public %} · public now{% else %} · public archive{% endif %}</p>
   <div class="inline-actions">
-    <form method="post" action="{{ url_for('web.admin_activate_tournament', slug=tournament.slug) }}">
+    <form method="post" action="{{ url_for('web.admin_activate_tournament', slug=tournament.slug) }}" data-preserve-open-round>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit">{{ "Currently public" if tournament.is_active_public else "Set as public tournament" }}</button>
+      <input type="hidden" name="open_round" value="">
+      <button type="submit">{{ "Remove from public homepage" if tournament.is_active_public else "Show on public homepage" }}</button>
     </form>
     {% if not tournament.is_historical %}
-      <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}">
+      <button type="button" class="secondary" data-open-modal="registration-settings">Registration settings</button>
+      <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}" data-confirm="Finish this tournament and update the leaderboard?" data-preserve-open-round>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="secondary">Complete tournament</button>
+        <input type="hidden" name="open_round" value="">
+        <button type="submit" class="secondary">{{ "Finished" if tournament.status == "completed" else "Finish tournament and update leaderboard" }}</button>
       </form>
     {% endif %}
   </div>
@@ -31,63 +34,152 @@
   <div class="section-heading">
     <h2>Rounds</h2>
   </div>
-  <nav class="tab-row">
-    {% for round_no in range(1, tournament.rounds_planned + 1) %}
-      <a class="{% if round_no == next_round %}is-active{% endif %}" href="{{ url_for('web.admin_round_detail', slug=tournament.slug, round_no=round_no) }}">Round {{ round_no }}</a>
+  <div class="round-jump-row">
+    {% for panel in round_panels %}
+      <button type="button" class="secondary tiny{% if panel.round_no == open_round %} is-active{% endif %}" data-round-open="{{ panel.round_no }}">Round {{ panel.round_no }}</button>
     {% endfor %}
-  </nav>
+  </div>
+  <div class="round-stack">
+    {% for panel in round_panels %}
+      <div
+        class="round-panel"
+        id="round-{{ panel.round_no }}"
+        data-round-panel
+        data-round-panel-no="{{ panel.round_no }}"
+        data-has-pairings="{{ 1 if panel.has_pairings else 0 }}"
+        {% if panel.round_no != open_round %}hidden{% endif %}
+      >
+        <div class="round-panel-body">
+          <div class="section-heading">
+            <h3>Round {{ panel.round_no }}</h3>
+            <small>{{ panel.board_count }} boards{% if panel.round_no == next_round and not panel.has_pairings %} · ready to pair{% endif %}</small>
+          </div>
+          {% if not tournament.is_historical %}
+            <div class="inline-actions round-actions">
+              <form
+                method="post"
+                action="{{ url_for('web.generate_round', slug=tournament.slug, round_no=panel.round_no) }}"
+                data-generate-form
+                {% if panel.round_no != next_round or panel.has_pairings %}hidden{% endif %}
+              >
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="secondary">Generate pairings</button>
+              </form>
+              {% if panel.round_no == editable_round %}
+                <button type="button" class="secondary tiny" data-add-board>+ Add board</button>
+              {% endif %}
+            </div>
+          {% endif %}
+
+          {% if panel.board_count == 0 %}
+            <p class="muted">Not enough available players in this round.</p>
+          {% else %}
+            <form
+              method="post"
+              action="{{ url_for('web.save_round', slug=tournament.slug, round_no=panel.round_no) }}"
+              class="autosave-round-form"
+              data-round-no="{{ panel.round_no }}"
+            >
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="board_count" value="{{ panel.board_count }}" data-board-count>
+              <div class="pairing-list" data-pairing-list>
+                {% for board in panel.board_rows %}
+                  <div class="pairing-row{% if not board.white_entry_id %} is-empty{% endif %}" data-pairing-row tabindex="0">
+                    <div class="pairing-board">
+                      <span data-board-label>Board {{ board.board_no }}</span>
+                    </div>
+                    <div class="pairing-side" data-pairing-field>
+                      <span class="pairing-display">{{ board.white_name or "Choose white" }}</span>
+                      {% if not tournament.is_historical %}
+                        <div class="pairing-edit">
+                          <select name="white_{{ board.board_no }}">
+                            <option value="">Choose white</option>
+                            {% for entry in panel.entries %}
+                              <option value="{{ entry.id }}" {% if board.white_entry_id == entry.id %}selected{% endif %}>{{ entry.imported_name }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                      {% endif %}
+                    </div>
+                    <div class="pairing-result" data-pairing-field>
+                      <span class="pairing-display pairing-result-text">{{ board.result_code or "—" }}</span>
+                      {% if not tournament.is_historical %}
+                        <div class="pairing-edit">
+                          <select name="result_{{ board.board_no }}">
+                            <option value="">—</option>
+                            {% for result in valid_results %}
+                              <option value="{{ result }}" {% if board.result_code == result %}selected{% endif %}>{{ result }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                      {% endif %}
+                    </div>
+                    <div class="pairing-side pairing-side-right" data-pairing-field>
+                      <span class="pairing-display">{{ board.black_name or "Bye / empty" }}</span>
+                      {% if not tournament.is_historical %}
+                        <div class="pairing-edit">
+                          <select name="black_{{ board.board_no }}">
+                            <option value="">Bye / empty</option>
+                            {% for entry in panel.entries %}
+                              <option value="{{ entry.id }}" {% if board.black_entry_id == entry.id %}selected{% endif %}>{{ entry.imported_name }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                      {% endif %}
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+              {% if not tournament.is_historical %}
+                <template data-empty-board-template>
+                  <div class="pairing-row is-empty" data-pairing-row tabindex="0">
+                    <div class="pairing-board">
+                      <span data-board-label>Board __BOARD__</span>
+                    </div>
+                    <div class="pairing-side" data-pairing-field>
+                      <span class="pairing-display">Choose white</span>
+                      <div class="pairing-edit">
+                        <select name="white___BOARD__">
+                          <option value="">Choose white</option>
+                          {% for entry in panel.entries %}
+                            <option value="{{ entry.id }}">{{ entry.imported_name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    </div>
+                    <div class="pairing-result" data-pairing-field>
+                      <span class="pairing-display pairing-result-text">—</span>
+                      <div class="pairing-edit">
+                        <select name="result___BOARD__">
+                          <option value="">—</option>
+                          {% for result in valid_results %}
+                            <option value="{{ result }}">{{ result }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    </div>
+                    <div class="pairing-side pairing-side-right" data-pairing-field>
+                      <span class="pairing-display">Bye / empty</span>
+                      <div class="pairing-edit">
+                        <select name="black___BOARD__">
+                          <option value="">Bye / empty</option>
+                          {% for entry in panel.entries %}
+                            <option value="{{ entry.id }}">{{ entry.imported_name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              {% endif %}
+              {% if not tournament.is_historical %}<p class="save-error" data-save-status hidden></p>{% endif %}
+            </form>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
 </section>
-
-{% if not tournament.is_historical %}
-  <section class="section grid two-col">
-    <div>
-      <div class="section-heading">
-        <h2>Add registrations</h2>
-      </div>
-      <form method="post" action="{{ url_for('web.import_registrations', slug=tournament.slug) }}" enctype="multipart/form-data" class="stack-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label>
-          Registration CSV
-          <input type="file" name="registrations" accept=".csv" required>
-        </label>
-        <button type="submit">Import registrations</button>
-      </form>
-    </div>
-
-    <div>
-      <div class="section-heading">
-        <h2>Standings snapshot</h2>
-        {% if latest_round %}
-          <small>Through round {{ latest_round }}</small>
-        {% endif %}
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Player</th>
-              <th>Score</th>
-              <th>{{ tournament.primary_tiebreak_label }}</th>
-              <th>{{ tournament.secondary_tiebreak_label }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in standings[:12] %}
-              <tr>
-                <td>{{ row.rank }}</td>
-                <td>{{ row.name }}</td>
-                <td>{{ row.score }}</td>
-                <td>{{ row.bh }}</td>
-                <td>{{ row.bh_c1 }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-{% endif %}
 
 <section class="section">
   <div class="section-heading">
@@ -97,45 +189,87 @@
     <table>
       <thead>
         <tr>
-          <th>Player</th>
+          <th>
+            <span class="sortable-header">
+              <span>Player</span>
+              <button type="button" class="sort-toggle" data-player-sort title="Click to sort by player name. Double-click to reset.">↕</button>
+            </span>
+          </th>
           <th>Member</th>
           <th>Seed</th>
-          <th>Rating identity</th>
           <th>Status</th>
+          <th>
+            <span class="sortable-header">
+              <span>Score</span>
+              <button type="button" class="sort-toggle" data-player-sort-score title="Click to sort by score. Double-click to reset.">↕</button>
+            </span>
+          </th>
+          <th>{{ tournament.primary_tiebreak_label }}</th>
+          <th>{{ tournament.secondary_tiebreak_label }}</th>
           {% for round_no in range(1, tournament.rounds_planned + 1) %}
             <th>R{{ round_no }}</th>
           {% endfor %}
         </tr>
       </thead>
-      <tbody>
+      <tbody data-player-table-body>
         {% for entry in entries %}
-          <tr class="{% if not entry.is_active %}is-muted{% endif %}">
-            <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=entry.id) }}">{{ entry.imported_name }}</a></td>
-            <td>{{ entry.member_status }}</td>
-            <td>{{ entry.seed_rating }}</td>
-            <td>{{ entry.canonical_rating_name or "new player" }}</td>
+          {% set standing = standings_by_entry.get(entry.id) %}
+          <tr
+            class="{% if not entry.is_active %}is-muted{% endif %}{% if entry.waitlist_position %} is-waitlist{% endif %}"
+            data-entry-id="{{ entry.id }}"
+            data-default-order="{{ loop.index0 }}"
+            data-player-name="{{ entry.imported_name|lower }}"
+            data-score="{{ '%.1f'|format(standing.score if standing else 0) }}"
+            data-bh="{{ '%.1f'|format(standing.bh if standing else 0) }}"
+            data-bhc1="{{ '%.1f'|format(standing.bh_c1 if standing else 0) }}"
+            data-availability-url="{{ url_for('web.toggle_availability', slug=tournament.slug, entry_id=entry.id) }}"
+            data-csrf-token="{{ csrf_token() }}"
+          >
             <td>
-              {% if tournament.is_historical %}
-                imported
-              {% else %}
-                <form method="post" action="{{ url_for('web.toggle_entry', slug=tournament.slug, entry_id=entry.id) }}">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                  <button type="submit" class="secondary">{{ "Remove" if entry.is_active else "Restore" }}</button>
-                </form>
+              <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=entry.id) }}">{{ entry.imported_name }}</a>
+              {% if entry.waitlist_position %}
+                <small class="waitlist-note">Waiting list #{{ entry.waitlist_position }}</small>
               {% endif %}
             </td>
+            <td>{{ "✅" if entry.member_status == "member" else "❌" }}</td>
+            <td>{{ entry.seed_rating }}</td>
+            <td>
+              {% if tournament.is_historical %}
+                <span class="status-pill {{ 'status-waitlist' if entry.waitlist_position else ('status-on' if entry.is_active else 'status-off') }}">
+                  {% if entry.waitlist_position %}waitlist #{{ entry.waitlist_position }}{% else %}{{ "active" if entry.is_active else "inactive" }}{% endif %}
+                </span>
+              {% else %}
+                <form method="post" action="{{ url_for('web.toggle_entry', slug=tournament.slug, entry_id=entry.id) }}" data-toggle-entry>
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="status-pill {{ 'status-waitlist' if entry.waitlist_position else ('status-on' if entry.is_active else 'status-off') }}" data-entry-status>
+                    {% if entry.waitlist_position %}waitlist #{{ entry.waitlist_position }}{% else %}{{ "active" if entry.is_active else "inactive" }}{% endif %}
+                  </button>
+                </form>
+                {% if entry.waitlist_position %}
+                  <form method="post" action="{{ url_for('web.confirm_waitlist_entry', slug=tournament.slug, entry_id=entry.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="secondary tiny">Confirm + email</button>
+                  </form>
+                {% endif %}
+              {% endif %}
+            </td>
+            <td data-score-cell>{{ "%.1f"|format(standing.score if standing else 0) }}</td>
+            <td data-bh-cell>{{ "%.1f"|format(standing.bh if standing else 0) }}</td>
+            <td data-bhc1-cell>{{ "%.1f"|format(standing.bh_c1 if standing else 0) }}</td>
             {% for round_no in range(1, tournament.rounds_planned + 1) %}
-              <td>
+              {% set cell = round_cells[entry.id][round_no] %}
+              {% set can_toggle_round = (not tournament.is_historical and entry.waitlist_position is none and round_no not in locked_rounds and cell.kind not in ["played", "bye"]) %}
+              <td class="round-cell round-cell-{{ cell.kind }}" data-round-cell="{{ round_no }}">
                 {% if tournament.is_historical %}
-                  {{ "In" if availability.get(entry.id, {}).get(round_no, True) else "Out" }}
-                {% else %}
-                  <form method="post" action="{{ url_for('web.toggle_availability', slug=tournament.slug, entry_id=entry.id) }}">
+                  {{ cell.label or "—" }}
+                {% elif can_toggle_round %}
+                  <form method="post" action="{{ url_for('web.toggle_availability', slug=tournament.slug, entry_id=entry.id) }}" data-toggle-availability>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="round_no" value="{{ round_no }}">
-                    <button type="submit" class="tiny {% if availability.get(entry.id, {}).get(round_no, True) %}secondary{% endif %}">
-                      {{ "In" if availability.get(entry.id, {}).get(round_no, True) else "Out" }}
-                    </button>
+                    <button type="submit" class="tiny secondary" data-availability-button>{{ "in" if availability.get(entry.id, {}).get(round_no, True) else "out" }}</button>
                   </form>
+                {% else %}
+                  {{ cell.label or "—" }}
                 {% endif %}
               </td>
             {% endfor %}
@@ -144,5 +278,152 @@
       </tbody>
     </table>
   </div>
+
+  {% if not tournament.is_historical %}
+    <form method="post" action="{{ url_for('web.add_entry', slug=tournament.slug) }}" class="stack-form centered-form add-player-form" data-player-search>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h3>Add player</h3>
+      <label class="autocomplete-field">
+        Name
+        <input type="text" name="name" autocomplete="off" required data-player-name>
+        <div class="autocomplete-results" hidden data-player-results></div>
+      </label>
+      <label>
+        Email (optional)
+        <input type="email" name="email" data-player-email>
+      </label>
+      <label>
+        Rating (optional)
+        <input type="number" name="declared_rating" min="0" max="4000" data-player-rating>
+      </label>
+      <button type="submit">Add player</button>
+    </form>
+  {% endif %}
 </section>
+
+{% if not tournament.is_historical %}
+  <div class="modal-backdrop" hidden data-modal="registration-settings">
+    <div class="modal-card modal-wide">
+      <div class="section-heading">
+        <h2>Registration settings</h2>
+        <button type="button" class="secondary tiny" data-close-modal="registration-settings">Close</button>
+      </div>
+      <p class="lede">
+        {{ "Visible on the registration page" if tournament.registration_enabled and tournament.registration_opens_at else "Hidden from the registration page" }}
+        {% if tournament.registration_opens_at %}
+          · opens at {{ tournament.registration_opens_at }}
+        {% endif %}
+        {% if tournament.event_time %}
+          · starts at {{ tournament.event_time }}
+        {% endif %}
+        {% if tournament.venue %}
+          · {{ tournament.venue }}
+        {% endif %}
+        · {{ registration_summary.confirmed_count }} confirmed
+        {% if tournament.max_registrations %}
+          / {{ tournament.max_registrations }} max
+        {% endif %}
+        {% if registration_summary.waitlist_count %}
+          · {{ registration_summary.waitlist_count }} on the waiting list
+        {% endif %}
+      </p>
+      <form method="post" action="{{ url_for('web.update_tournament_registration', slug=tournament.slug) }}" class="stack-form modal-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="checkbox-row">
+          <input type="checkbox" name="registration_enabled" value="1" {% if tournament.registration_enabled %}checked{% endif %}>
+          <span>Open tournament registration</span>
+        </label>
+        <label>
+          Registration opens at
+          <input type="datetime-local" name="registration_opens_at" value="{{ tournament.registration_opens_at or '' }}">
+        </label>
+        <label>
+          Start time
+          <input type="time" name="event_time" value="{{ tournament.event_time or '' }}">
+        </label>
+        <label>
+          Venue
+          <input type="text" name="venue" value="{{ tournament.venue or '' }}" placeholder="CAB, room H52, ..."
+          >
+        </label>
+        <label>
+          Maximum registrations
+          <input type="number" name="max_registrations" min="1" value="{{ tournament.max_registrations or '' }}">
+        </label>
+        <section class="custom-fields-editor">
+          <div class="section-heading">
+            <div>
+              <h3>Extra registration fields</h3>
+              <p class="muted">These appear below the standard fields on the public registration form. Added fields are required.</p>
+            </div>
+            <div class="inline-actions">
+              <button type="button" class="secondary tiny" data-add-registration-field="text">+ Text field</button>
+              <button type="button" class="secondary tiny" data-add-registration-field="dropdown">+ Dropdown</button>
+            </div>
+          </div>
+          <div class="custom-field-list" data-registration-fields>
+            {% for field in registration_fields %}
+              <div class="custom-field-card" data-registration-field>
+                <div class="section-heading">
+                  <strong>{{ "Dropdown" if field.type == "dropdown" else "Text field" }}</strong>
+                  <button type="button" class="secondary tiny" data-remove-registration-field>Remove</button>
+                </div>
+                <input type="hidden" name="registration_field_type" value="{{ field.type }}">
+                <label>
+                  Label
+                  <input type="text" name="registration_field_label" value="{{ field.label }}" maxlength="80" required>
+                </label>
+                {% if field.type == "dropdown" %}
+                <label data-registration-field-options>
+                  Options
+                  <textarea name="registration_field_options" rows="4" placeholder="One option per line">{{ field.options|join('\n') }}</textarea>
+                </label>
+                {% else %}
+                <input type="hidden" name="registration_field_options" value="">
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          <p class="muted" data-registration-fields-empty{% if registration_fields %} hidden{% endif %}>No extra fields yet.</p>
+          <template data-registration-field-template="text">
+            <div class="custom-field-card" data-registration-field>
+              <div class="section-heading">
+                <strong>Text field</strong>
+                <button type="button" class="secondary tiny" data-remove-registration-field>Remove</button>
+              </div>
+              <input type="hidden" name="registration_field_type" value="text">
+              <label>
+                Label
+                <input type="text" name="registration_field_label" maxlength="80" required>
+              </label>
+              <input type="hidden" name="registration_field_options" value="">
+            </div>
+          </template>
+          <template data-registration-field-template="dropdown">
+            <div class="custom-field-card" data-registration-field>
+              <div class="section-heading">
+                <strong>Dropdown</strong>
+                <button type="button" class="secondary tiny" data-remove-registration-field>Remove</button>
+              </div>
+              <input type="hidden" name="registration_field_type" value="dropdown">
+              <label>
+                Label
+                <input type="text" name="registration_field_label" maxlength="80" required>
+              </label>
+              <label data-registration-field-options>
+                Options
+                <textarea name="registration_field_options" rows="4" placeholder="One option per line"></textarea>
+              </label>
+            </div>
+          </template>
+        </section>
+        <button type="submit">Save registration settings</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
 {% endblock %}

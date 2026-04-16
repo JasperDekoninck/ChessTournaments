@@ -50,6 +50,13 @@ def _write_if_requested(frame: pd.DataFrame, save_folder: str | None, file_name:
     return frame
 
 
+def _round_rating(value: float | int) -> int:
+    numeric = float(value)
+    if numeric >= 0:
+        return int(numeric + 0.5)
+    return -int(abs(numeric) + 0.5)
+
+
 class DetailedLeaderboard(Statistic):
     @staticmethod
     def compute_leaderboard(player_database: PlayerDatabase, game_database: GameDatabase) -> pd.DataFrame:
@@ -114,7 +121,7 @@ class Leaderboard(Statistic):
             last_game_date = max(last_game_dates)
             condition_met = wins + losses + draws >= 12 and last_game_date >= datetime.now() - timedelta(days=recent_days)
             if not restricted or condition_met:
-                leaderboard.append((player.name, int(rating.rating), wins, losses, draws))
+                leaderboard.append((player.name, _round_rating(rating.rating), wins, losses, draws))
         leaderboard.sort(key=lambda x: x[1], reverse=True)
         return pd.DataFrame(leaderboard, columns=["Name", "Rating", "Wins", "Losses", "Draws"])
 
@@ -177,9 +184,9 @@ class AnonymousLeaderboard(Statistic):
             question_mark = " (?)" if n_games < 12 else ""
             if condition_met:
                 if not is_anon:
-                    leaderboard.append((player.name, str(int(rating.rating)) + question_mark, wins, losses, draws))
+                    leaderboard.append((player.name, str(_round_rating(rating.rating)) + question_mark, wins, losses, draws))
                 else:
-                    leaderboard.append(("Anonymous", str(int(rating.rating)), "", "", ""))
+                    leaderboard.append(("Anonymous", str(_round_rating(rating.rating)), "", "", ""))
         leaderboard.sort(key=lambda x: int(x[1].split(" ")[0]), reverse=True)
         frame = pd.DataFrame(leaderboard, columns=["Name", "Rating", "Wins", "Losses", "Draws"])
         frame["Rank"] = [i + 1 for i in range(len(frame))]
@@ -224,10 +231,10 @@ class TournamentRanking(TournamentStatistic):
         for player_stats in tournament.get_results():
             player = player_database[player_stats["player"]]
             player_rating = player.get_rating_at_date(tournament.get_date(), next=True)
-            ranking_info = [player.name, int(player_rating.rating), player_stats["score"]]
+            ranking_info = [player.name, _round_rating(player_rating.rating), player_stats["score"]]
             for tie_break_name in tournament.tie_break_names:
                 ranking_info.append(player_stats[tie_break_name])
-            ranking_info.append(int(player_stats["rating_performance"].rating))
+            ranking_info.append(_round_rating(player_stats["rating_performance"].rating))
             ranking.append(ranking_info)
         ranking.sort(key=lambda x: tuple(x[2:]), reverse=True)
         frame = pd.DataFrame(

@@ -5,6 +5,15 @@
   <p class="kicker">Player History</p>
   <h1>{{ entry.imported_name }}</h1>
   <p class="lede">Previous rated games linked to {{ entry.canonical_rating_name or entry.imported_name }}.</p>
+  {% if profile %}
+    <div class="profile-summary">
+      <span><strong>Rating:</strong> {{ profile.rating if profile.rating is not none else "—" }}</span>
+      <span><strong>Games:</strong> {{ profile.games }}</span>
+      <span><strong>Wins:</strong> {{ profile.wins }}</span>
+      <span><strong>Losses:</strong> {{ profile.losses }}</span>
+      <span><strong>Draws:</strong> {{ profile.draws }}</span>
+    </div>
+  {% endif %}
 </section>
 
 <section class="section">

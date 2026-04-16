@@ -4,33 +4,32 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}ETH Chess{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   </head>
   <body>
     <header class="site-header">
       <div class="wrap site-header-inner">
         <a class="brand" href="{{ url_for('web.index') }}">
-          <span class="brand-mark">ETH</span>
+          <img class="brand-logo" src="{{ url_for('static', filename='logo.png') }}" alt="ETH Chess logo">
           <span class="brand-copy">
             <strong>Chess Tournaments</strong>
             <small>pairings, standings, ratings</small>
           </span>
         </a>
         <nav class="site-nav">
-          <a href="{{ url_for('web.index') }}">Current</a>
-          <a href="{{ url_for('web.archive') }}">Archive</a>
-          <a href="{{ url_for('web.ratings') }}">Leaderboard</a>
-          <a href="{{ url_for('web.admin') }}">Admin</a>
+          <a href="{{ url_for('web.register') }}">Register</a>
+          <a href="{{ url_for('web.leaderboard') }}">Leaderboard</a>
         </nav>
       </div>
     </header>
 
     <div class="wrap page">
-      {% with messages = get_flashed_messages() %}
+      {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <section class="flash-list">
-            {% for message in messages %}
-              <p class="flash">{{ message }}</p>
+            {% for category, message in messages %}
+              <p class="flash flash-{{ category }}">{{ message }}</p>
             {% endfor %}
           </section>
         {% endif %}
@@ -38,5 +37,6 @@
 
       {% block content %}{% endblock %}
     </div>
+    {% block scripts %}{% endblock %}
   </body>
 </html>

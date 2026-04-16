@@ -6,10 +6,17 @@ CREATE TABLE IF NOT EXISTS tournament (
   rounds_planned INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft',
   registration_csv_name TEXT,
+  registration_enabled INTEGER NOT NULL DEFAULT 0,
+  registration_opens_at TEXT,
+  registration_form_json TEXT,
+  event_time TEXT,
+  venue TEXT,
+  max_registrations INTEGER,
   source_type TEXT NOT NULL DEFAULT 'local',
   source_ref TEXT,
   primary_tiebreak_label TEXT NOT NULL DEFAULT 'BH',
   secondary_tiebreak_label TEXT NOT NULL DEFAULT 'BH-C1',
+  public_insights_json TEXT,
   is_historical INTEGER NOT NULL DEFAULT 0,
   is_public INTEGER NOT NULL DEFAULT 1,
   is_active_public INTEGER NOT NULL DEFAULT 0,
@@ -42,6 +49,14 @@ CREATE TABLE IF NOT EXISTS player (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_player_email ON player(email) WHERE email IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_player_name ON player(normalized_name);
 
+CREATE TABLE IF NOT EXISTS member_override (
+  player_id INTEGER PRIMARY KEY REFERENCES player(id) ON DELETE CASCADE,
+  is_member INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_member_override_status ON member_override(is_member);
+
 CREATE TABLE IF NOT EXISTS tournament_entry (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tournament_id INTEGER NOT NULL REFERENCES tournament(id) ON DELETE CASCADE,
@@ -53,6 +68,10 @@ CREATE TABLE IF NOT EXISTS tournament_entry (
   seed_rating INTEGER NOT NULL,
   member_status TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1,
+  registration_source TEXT,
+  registration_order INTEGER,
+  registration_answers_json TEXT,
+  waitlist_position INTEGER,
   final_rank INTEGER,
   final_score REAL,
   final_primary_tiebreak REAL,
@@ -60,6 +79,9 @@ CREATE TABLE IF NOT EXISTS tournament_entry (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (tournament_id, player_id)
 );
+
+CREATE INDEX IF NOT EXISTS idx_tournament_entry_player
+ON tournament_entry(player_id);
 
 CREATE TABLE IF NOT EXISTS entry_round_status (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,6 +103,12 @@ CREATE TABLE IF NOT EXISTS pairing (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (tournament_id, round_no, board_no)
 );
+
+CREATE INDEX IF NOT EXISTS idx_pairing_white_entry
+ON pairing(white_entry_id);
+
+CREATE INDEX IF NOT EXISTS idx_pairing_black_entry
+ON pairing(black_entry_id);
 
 CREATE TABLE IF NOT EXISTS app_config (
   key TEXT PRIMARY KEY,
