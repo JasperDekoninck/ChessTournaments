@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+<section class="section narrow">
+  <p class="kicker">Admin</p>
+  <h1>Sign in</h1>
+  <p class="lede">Only admins can create tournaments, edit pairings, enter results, or change the public event.</p>
+
+  <form method="post" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>
+      Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Sign in</button>
+  </form>
+</section>
+{% endblock %}

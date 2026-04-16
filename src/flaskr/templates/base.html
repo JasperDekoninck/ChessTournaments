@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}ETH Chess{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="wrap site-header-inner">
+        <a class="brand" href="{{ url_for('web.index') }}">
+          <span class="brand-mark">ETH</span>
+          <span class="brand-copy">
+            <strong>Chess Tournaments</strong>
+            <small>pairings, standings, ratings</small>
+          </span>
+        </a>
+        <nav class="site-nav">
+          <a href="{{ url_for('web.index') }}">Current</a>
+          <a href="{{ url_for('web.archive') }}">Archive</a>
+          <a href="{{ url_for('web.ratings') }}">Leaderboard</a>
+          <a href="{{ url_for('web.admin') }}">Admin</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="wrap page">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <section class="flash-list">
+            {% for message in messages %}
+              <p class="flash">{{ message }}</p>
+            {% endfor %}
+          </section>
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ tournament.name }} · Round {{ round_no }}{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Round Admin</p>
+      <h1>{{ tournament.name }} · Round {{ round_no }}</h1>
+    </div>
+    <div class="inline-actions">
+      <a class="button-link secondary" href="{{ url_for('web.admin_tournament_detail', slug=tournament.slug) }}">Back to tournament</a>
+      <a class="button-link secondary" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=round_no) }}">Public round</a>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  {% if tournament.is_historical %}
+    <p class="muted">This round was imported from the original source files and is read-only.</p>
+  {% else %}
+    <div class="inline-actions">
+      <form method="post" action="{{ url_for('web.generate_round', slug=tournament.slug, round_no=round_no) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Generate pairings</button>
+      </form>
+    </div>
+  {% endif %}
+</section>
+
+<section class="section">
+  {% if tournament.is_historical %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Board</th>
+            <th>White</th>
+            <th>Black</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for board in board_rows %}
+            <tr>
+              <td>{{ board.board_no }}</td>
+              <td>{{ board.white_name or "-" }}</td>
+              <td>{{ board.black_name or "Bye" }}</td>
+              <td>{{ board.result_code or "-" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <form method="post" action="{{ url_for('web.save_round', slug=tournament.slug, round_no=round_no) }}" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="board_count" value="{{ board_count }}">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Board</th>
+              <th>White</th>
+              <th>Black</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for board in board_rows %}
+              <tr>
+                <td>{{ board.board_no }}</td>
+                <td>
+                  <select name="white_{{ board.board_no }}">
+                    <option value=""></option>
+                    {% for entry in active_entries %}
+                      <option value="{{ entry.id }}" {% if board.white_entry_id == entry.id %}selected{% endif %}>{{ entry.imported_name }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td>
+                  <select name="black_{{ board.board_no }}">
+                    <option value=""></option>
+                    {% for entry in active_entries %}
+                      <option value="{{ entry.id }}" {% if board.black_entry_id == entry.id %}selected{% endif %}>{{ entry.imported_name }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+                <td>
+                  <select name="result_{{ board.board_no }}">
+                    <option value=""></option>
+                    {% for result in valid_results %}
+                      <option value="{{ result }}" {% if board.result_code == result %}selected{% endif %}>{{ result }}</option>
+                    {% endfor %}
+                  </select>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button type="submit">Save boards and results</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

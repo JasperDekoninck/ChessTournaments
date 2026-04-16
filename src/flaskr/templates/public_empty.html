@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Current Tournament{% endblock %}
+{% block content %}
+<section class="section">
+  <p class="kicker">Current Tournament</p>
+  <h1>No public tournament is active yet.</h1>
+  <p class="lede">Once an admin activates a tournament, this page will show the live boards and standings.</p>
+</section>
+
+{% if tournaments %}
+  <section class="section">
+    <div class="section-heading">
+      <h2>Recent Tournaments</h2>
+      <a href="{{ url_for('web.archive') }}">See all</a>
+    </div>
+    <div class="link-list">
+      {% for tournament in tournaments[:8] %}
+        <a href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">
+          <span>{{ tournament.name }}</span>
+          <small>{{ tournament.event_date }}</small>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
+
+<section class="section">
+  <div class="section-heading">
+    <h2>Anonymous Leaderboard</h2>
+    <a href="{{ url_for('web.export_anonymous_leaderboard') }}">CSV</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Name</th>
+          <th>Rating</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in leaderboard %}
+          <tr>
+            <td>{{ row.Rank }}</td>
+            <td>{{ row.Name }}</td>
+            <td>{{ row.Rating }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="3" class="muted">No leaderboard is available yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

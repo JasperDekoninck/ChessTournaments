@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ tournament.name }} · Admin{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Tournament Admin</p>
+      <h1>{{ tournament.name }}</h1>
+    </div>
+    <div class="inline-actions">
+      <a class="button-link secondary" href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">Public view</a>
+      <a class="button-link secondary" href="{{ url_for('web.export_tournament', slug=tournament.slug) }}">CSV export</a>
+    </div>
+  </div>
+  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds · {{ tournament.status }}</p>
+  <div class="inline-actions">
+    <form method="post" action="{{ url_for('web.admin_activate_tournament', slug=tournament.slug) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit">{{ "Currently public" if tournament.is_active_public else "Set as public tournament" }}</button>
+    </form>
+    {% if not tournament.is_historical %}
+      <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="secondary">Complete tournament</button>
+      </form>
+    {% endif %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-heading">
+    <h2>Rounds</h2>
+  </div>
+  <nav class="tab-row">
+    {% for round_no in range(1, tournament.rounds_planned + 1) %}
+      <a class="{% if round_no == next_round %}is-active{% endif %}" href="{{ url_for('web.admin_round_detail', slug=tournament.slug, round_no=round_no) }}">Round {{ round_no }}</a>
+    {% endfor %}
+  </nav>
+</section>
+
+{% if not tournament.is_historical %}
+  <section class="section grid two-col">
+    <div>
+      <div class="section-heading">
+        <h2>Add registrations</h2>
+      </div>
+      <form method="post" action="{{ url_for('web.import_registrations', slug=tournament.slug) }}" enctype="multipart/form-data" class="stack-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>
+          Registration CSV
+          <input type="file" name="registrations" accept=".csv" required>
+        </label>
+        <button type="submit">Import registrations</button>
+      </form>
+    </div>
+
+    <div>
+      <div class="section-heading">
+        <h2>Standings snapshot</h2>
+        {% if latest_round %}
+          <small>Through round {{ latest_round }}</small>
+        {% endif %}
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Player</th>
+              <th>Score</th>
+              <th>{{ tournament.primary_tiebreak_label }}</th>
+              <th>{{ tournament.secondary_tiebreak_label }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in standings[:12] %}
+              <tr>
+                <td>{{ row.rank }}</td>
+                <td>{{ row.name }}</td>
+                <td>{{ row.score }}</td>
+                <td>{{ row.bh }}</td>
+                <td>{{ row.bh_c1 }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+{% endif %}
+
+<section class="section">
+  <div class="section-heading">
+    <h2>Players</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Member</th>
+          <th>Seed</th>
+          <th>Rating identity</th>
+          <th>Status</th>
+          {% for round_no in range(1, tournament.rounds_planned + 1) %}
+            <th>R{{ round_no }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+          <tr class="{% if not entry.is_active %}is-muted{% endif %}">
+            <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=entry.id) }}">{{ entry.imported_name }}</a></td>
+            <td>{{ entry.member_status }}</td>
+            <td>{{ entry.seed_rating }}</td>
+            <td>{{ entry.canonical_rating_name or "new player" }}</td>
+            <td>
+              {% if tournament.is_historical %}
+                imported
+              {% else %}
+                <form method="post" action="{{ url_for('web.toggle_entry', slug=tournament.slug, entry_id=entry.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="secondary">{{ "Remove" if entry.is_active else "Restore" }}</button>
+                </form>
+              {% endif %}
+            </td>
+            {% for round_no in range(1, tournament.rounds_planned + 1) %}
+              <td>
+                {% if tournament.is_historical %}
+                  {{ "In" if availability.get(entry.id, {}).get(round_no, True) else "Out" }}
+                {% else %}
+                  <form method="post" action="{{ url_for('web.toggle_availability', slug=tournament.slug, entry_id=entry.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="round_no" value="{{ round_no }}">
+                    <button type="submit" class="tiny {% if availability.get(entry.id, {}).get(round_no, True) %}secondary{% endif %}">
+                      {{ "In" if availability.get(entry.id, {}).get(round_no, True) else "Out" }}
+                    </button>
+                  </form>
+                {% endif %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

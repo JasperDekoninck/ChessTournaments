@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Archive{% endblock %}
+{% block content %}
+<section class="section">
+  <p class="kicker">Archive</p>
+  <h1>Past tournaments</h1>
+  <p class="lede">All public tournaments imported into the local system, including the older events reconstructed from the original source files.</p>
+</section>
+
+<section class="section">
+  <div class="link-list archive-list">
+    {% for tournament in tournaments %}
+      <a href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">
+        <span>{{ tournament.name }}</span>
+        <small>{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds</small>
+      </a>
+    {% else %}
+      <p class="muted">No tournaments available.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

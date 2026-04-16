@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}{{ tournament.name }}{% endblock %}
+{% block content %}
+<section class="section">
+  <p class="kicker">{% if show_as_home %}Current Tournament{% elif tournament.is_historical %}Past Tournament{% else %}Tournament{% endif %}</p>
+  <h1>{{ tournament.name }}</h1>
+  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds</p>
+</section>
+
+<section class="section grid two-col">
+  <div>
+    <div class="section-heading">
+      <h2>{% if selected_round %}Round {{ selected_round }}{% else %}Boards{% endif %}</h2>
+      {% if latest_round %}
+        <small>Latest published round: {{ latest_round }}</small>
+      {% endif %}
+    </div>
+    {% if round_numbers %}
+      <nav class="tab-row">
+        {% for round_no in round_numbers %}
+          <a class="{% if round_no == selected_round %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=round_no) }}">Round {{ round_no }}</a>
+        {% endfor %}
+      </nav>
+    {% endif %}
+    {% if pairings %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Board</th>
+              <th>White</th>
+              <th>Black</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pairing in pairings %}
+              <tr>
+                <td>{{ pairing.board_no }}</td>
+                <td>
+                  {% if pairing.white_entry_id %}
+                    <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.white_entry_id) }}">{{ pairing.white_name }}</a>
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>
+                  {% if pairing.black_entry_id %}
+                    <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.black_entry_id) }}">{{ pairing.black_name }}</a>
+                  {% else %}
+                    Bye
+                  {% endif %}
+                </td>
+                <td>{{ pairing.result_code or "Pending" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Boards will appear here once a round has been generated.</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <div class="section-heading">
+      <h2>Standings</h2>
+      <small>{{ tournament.primary_tiebreak_label }} / {{ tournament.secondary_tiebreak_label }}</small>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Player</th>
+            <th>Score</th>
+            <th>{{ tournament.primary_tiebreak_label }}</th>
+            <th>{{ tournament.secondary_tiebreak_label }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in standings %}
+            <tr>
+              <td>{{ row.rank }}</td>
+              <td>{{ row.name }}</td>
+              <td>{{ row.score }}</td>
+              <td>{{ row.bh }}</td>
+              <td>{{ row.bh_c1 }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="5" class="muted">No standings yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-heading">
+    <h2>Past Tournaments</h2>
+    <a href="{{ url_for('web.archive') }}">Open archive</a>
+  </div>
+  <div class="link-list">
+    {% for item in archive %}
+      <a href="{{ url_for('web.public_tournament', slug=item.slug) }}" class="{% if item.slug == tournament.slug %}is-current{% endif %}">
+        <span>{{ item.name }}</span>
+        <small>{{ item.event_date }}</small>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

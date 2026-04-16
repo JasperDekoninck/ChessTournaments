@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eth-chess-tournaments"
+version = "0.1.0"
+description = "Integrated ETH Chess tournament administration and rating website."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "flask>=3.1.0",
+  "loguru>=0.7.2",
+  "numpy>=2.2.0",
+  "pandas>=2.2.0",
+  "scipy>=1.14.0",
+  "sortedcontainers>=2.4.0",
+  "tqdm>=4.67.0",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

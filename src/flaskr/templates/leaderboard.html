@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Anonymous Leaderboard{% endblock %}
+{% block content %}
+<section class="section">
+  <p class="kicker">Leaderboard</p>
+  <h1>Anonymous club leaderboard</h1>
+  <p class="lede">Current rating table rebuilt locally from the integrated rating engine.</p>
+</section>
+
+<section class="section">
+  <div class="section-heading">
+    <h2>Ratings</h2>
+    <a href="{{ url_for('web.export_anonymous_leaderboard') }}">CSV</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Name</th>
+          <th>Rating</th>
+          <th>W</th>
+          <th>L</th>
+          <th>D</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in leaderboard %}
+          <tr>
+            <td>{{ row.Rank }}</td>
+            <td>{{ row.Name }}</td>
+            <td>{{ row.Rating }}</td>
+            <td>{{ row.Wins }}</td>
+            <td>{{ row.Losses }}</td>
+            <td>{{ row.Draws }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6" class="muted">No leaderboard is available yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

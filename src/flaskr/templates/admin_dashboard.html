@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-heading">
+    <div>
+      <p class="kicker">Admin</p>
+      <h1>Tournament desk</h1>
+    </div>
+    <form method="post" action="{{ url_for('web.admin_logout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="secondary">Sign out</button>
+    </form>
+  </div>
+  <p class="lede">Active public tournament: <strong>{{ active_tournament.name if active_tournament else "none" }}</strong></p>
+</section>
+
+<section class="section grid two-col">
+  <div>
+    <div class="section-heading">
+      <h2>Create tournament</h2>
+    </div>
+    <form method="post" action="{{ url_for('web.create_tournament') }}" enctype="multipart/form-data" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>
+        Name
+        <input type="text" name="name" placeholder="Easter Tournament 2026" required>
+      </label>
+      <label>
+        Date
+        <input type="date" name="event_date" required>
+      </label>
+      <label>
+        Rounds
+        <input type="number" name="rounds_planned" min="1" max="15" value="7" required>
+      </label>
+      <label>
+        Registration CSV
+        <input type="file" name="registrations" accept=".csv">
+      </label>
+      <button type="submit">Create tournament</button>
+    </form>
+  </div>
+
+  <div>
+    <div class="section-heading">
+      <h2>Ratings</h2>
+    </div>
+    <p><strong>Imported:</strong> {{ "Yes" if rating.ready else "No" }}</p>
+    <p><strong>Historical tournaments:</strong> {{ rating.historical_count }}</p>
+    <div class="inline-actions">
+      <form method="post" action="{{ url_for('web.rebuild_ratings') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Rebuild ratings</button>
+      </form>
+      <form method="post" action="{{ url_for('web.sync_history') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="secondary">Sync past tournaments</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="section grid two-col">
+  <div>
+    <div class="section-heading">
+      <h2>Admin password</h2>
+    </div>
+    <form method="post" action="{{ url_for('web.admin_password') }}" class="stack-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>
+        Current password
+        <input type="password" name="current_password" autocomplete="current-password" required>
+      </label>
+      <label>
+        New password
+        <input type="password" name="new_password" autocomplete="new-password" minlength="10" required>
+      </label>
+      <label>
+        Repeat new password
+        <input type="password" name="confirm_password" autocomplete="new-password" minlength="10" required>
+      </label>
+      <button type="submit">Change password</button>
+    </form>
+  </div>
+
+  <div>
+    <div class="section-heading">
+      <h2>Top 20</h2>
+      <a href="{{ url_for('web.ratings') }}">Full leaderboard</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Name</th>
+            <th>Rating</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in leaderboard %}
+            <tr>
+              <td>{{ row.Rank }}</td>
+              <td>{{ row.Name }}</td>
+              <td>{{ row.Rating }}</td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="3" class="muted">No leaderboard available yet.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-heading">
+    <h2>Tournaments</h2>
+  </div>
+  <div class="link-list archive-list">
+    {% for tournament in tournaments %}
+      <a href="{{ url_for('web.admin_tournament_detail', slug=tournament.slug) }}">
+        <span>{{ tournament.name }}</span>
+        <small>{{ tournament.event_date }} · {{ tournament.status }}{% if tournament.is_active_public %} · public{% endif %}</small>
+      </a>
+    {% else %}
+      <p class="muted">No tournaments yet.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
