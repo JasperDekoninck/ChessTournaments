@@ -101,6 +101,24 @@ def flash_info(message: str):
     flash(message, "info")
 
 
+def _admin_player_email(db, player_name: str) -> str | None:
+    if not session.get("is_admin"):
+        return None
+    normalized = normalize_name(player_name)
+    row = db.execute(
+        """
+        SELECT email
+        FROM player
+        WHERE normalized_name = ?
+           OR COALESCE(canonical_rating_name, '') = ?
+        ORDER BY CASE WHEN normalized_name = ? THEN 0 ELSE 1 END, id ASC
+        LIMIT 1
+        """,
+        (normalized, player_name, normalized),
+    ).fetchone()
+    return None if row is None else row["email"]
+
+
 def _tournament_or_404(slug: str):
     tournament = fetch_tournament_by_slug(get_db(), slug)
     if tournament is None:
@@ -600,13 +618,13 @@ def submit_registration(slug: str):
 
     email_sent, _ = send_registration_email(tournament, row, waitlist_position)
     if waitlist_position is not None:
-        message = f"Registration received for {tournament['name']}. The event is currently full, so you are on the waiting list in position {waitlist_position}."
+        message = f"You have been added to the waiting list for {tournament['name']}. You are on the waiting list in position {waitlist_position}."
         if email_sent:
             flash_warning(f"{message} A confirmation email has been sent.")
         else:
             flash_warning(message)
     else:
-        message = f"Registration received for {tournament['name']}. Your spot is confirmed."
+        message = f"You have successfully registered for {tournament['name']}!"
         if email_sent:
             flash_success(f"{message} A confirmation email has been sent.")
         else:
@@ -616,12 +634,14 @@ def submit_registration(slug: str):
 
 @bp.route("/players/<path:player_name>")
 def leaderboard_player(player_name: str):
+    db = get_db()
     profile = get_player_profile(player_name)
     return render_template(
         "global_player_history.html",
         player_name=profile["name"] if profile else player_name,
         profile=profile,
         games=get_player_history(player_name),
+        admin_email=_admin_player_email(db, profile["name"] if profile else player_name),
     )
 
 
@@ -634,6 +654,8 @@ def player_history(slug: str, entry_id: int):
         SELECT
           e.id,
           e.imported_name,
+          e.imported_email,
+          p.email AS player_email,
           p.canonical_rating_name
         FROM tournament_entry e
         JOIN player p ON p.id = e.player_id
@@ -651,6 +673,7 @@ def player_history(slug: str, entry_id: int):
         entry=entry,
         profile=profile,
         games=get_player_history(player_name),
+        admin_email=(entry["imported_email"] or entry["player_email"]) if session.get("is_admin") else None,
     )
 
 

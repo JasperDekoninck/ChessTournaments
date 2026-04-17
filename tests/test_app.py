@@ -1256,6 +1256,9 @@ class TournamentAppTestCase(unittest.TestCase):
 
     def test_player_history_page_shows_profile_summary(self):
         slug = self._create_tournament(name="Profile Summary Tournament")
+        self._publish_tournament(slug)
+        with self.client.session_transaction() as session:
+            session.clear()
         with self.app.app_context():
             db = get_db()
             entry_id = db.execute(
@@ -1270,6 +1273,35 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertIn(b"Wins:", response.data)
         self.assertIn(b"Losses:", response.data)
         self.assertIn(b"Draws:", response.data)
+        self.assertNotIn(b"Email:", response.data)
+
+    def test_player_history_page_shows_email_only_to_admin(self):
+        slug = self._create_tournament(name="Admin Email Visibility Tournament")
+        self._publish_tournament(slug)
+        with self.client.session_transaction() as session:
+            session.clear()
+        with self.app.app_context():
+            db = get_db()
+            row = db.execute(
+                """
+                SELECT id, imported_email
+                FROM tournament_entry
+                WHERE tournament_id = (SELECT id FROM tournament WHERE slug = ?)
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (slug,),
+            ).fetchone()
+        response = self.client.get(f"/t/{slug}/player/{row['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Email:", response.data)
+        self.assertNotIn(row["imported_email"].encode("utf-8"), response.data)
+
+        self._login()
+        response = self.client.get(f"/t/{slug}/player/{row['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Email:", response.data)
+        self.assertIn(row["imported_email"].encode("utf-8"), response.data)
 
     def test_import_rating_history_syncs_rounds_from_source_csv(self):
         source_root = Path(self.tempdir.name) / "source"
