@@ -90,25 +90,43 @@ const updatePairingDisplay = (row) => {
   const whiteSelect = row.querySelector('select[name^="white_"]');
   const blackSelect = row.querySelector('select[name^="black_"]');
   const resultSelect = row.querySelector('select[name^="result_"]');
+  const whiteDisplay = row.querySelector('[data-pairing-display="white"]');
+  const blackDisplay = row.querySelector('[data-pairing-display="black"]');
+  const resultLabel = row.querySelector("[data-result-label]");
+  const resultButtons = row.querySelector("[data-result-button-group]");
+  const hasWhite = Boolean(whiteSelect?.value);
+  const hasOpponent = Boolean(blackSelect?.value);
+  const hasPairing = hasWhite && hasOpponent;
   if (resultSelect) {
     const byeOption = Array.from(resultSelect.options).find((option) => option.value === "BYE");
-    const hasOpponent = Boolean(blackSelect?.value);
     if (byeOption) {
       byeOption.disabled = hasOpponent;
     }
-    if (hasOpponent && resultSelect.value === "BYE") {
+    if (!hasWhite && resultSelect.value === "BYE") {
+      resultSelect.value = "";
+    } else if (!hasOpponent && hasWhite) {
+      resultSelect.value = "BYE";
+    } else if (hasOpponent && resultSelect.value === "BYE") {
       resultSelect.value = "";
     }
   }
-  const displays = row.querySelectorAll(".pairing-display");
-  if (whiteSelect && displays[0]) {
-    displays[0].textContent = whiteSelect.options[whiteSelect.selectedIndex]?.text || "Choose white";
+  if (whiteSelect && whiteDisplay) {
+    whiteDisplay.textContent = whiteSelect.options[whiteSelect.selectedIndex]?.text || "Choose white";
   }
-  if (resultSelect && displays[1]) {
-    displays[1].textContent = resultSelect.value || "—";
+  if (blackSelect && blackDisplay) {
+    blackDisplay.textContent = blackSelect.options[blackSelect.selectedIndex]?.text || "Bye / empty";
   }
-  if (blackSelect && displays[2]) {
-    displays[2].textContent = blackSelect.options[blackSelect.selectedIndex]?.text || "Bye / empty";
+  if (resultButtons) {
+    resultButtons.hidden = !hasPairing;
+    resultButtons.querySelectorAll("[data-result-choice]").forEach((button) => {
+      const isSelected = resultSelect?.value === button.dataset.resultChoice;
+      button.classList.toggle("is-selected", isSelected);
+      button.setAttribute("aria-pressed", isSelected ? "true" : "false");
+    });
+  }
+  if (resultLabel) {
+    resultLabel.textContent = hasWhite ? (hasOpponent ? "—" : "BYE") : "—";
+    resultLabel.hidden = hasPairing;
   }
   row.classList.toggle("is-empty", !whiteSelect?.value);
 };
@@ -220,23 +238,6 @@ const applyEntryUpdates = (roundNo, entryUpdates) => {
 
 const bindPairingRow = (form, row, openRow) => {
   updatePairingDisplay(row);
-  row.addEventListener("click", (event) => {
-    if (event.target.closest("select")) {
-      return;
-    }
-    openRow(row);
-  });
-  row.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      row.classList.remove("is-editing");
-      return;
-    }
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
-    event.preventDefault();
-    openRow(row);
-  });
   row.querySelectorAll("[data-pairing-field]").forEach((field) => {
     field.addEventListener("click", (event) => {
       if (event.target.closest("select")) {
@@ -256,6 +257,38 @@ const bindPairingRow = (form, row, openRow) => {
           select.click();
         }
       });
+    });
+    field.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      openRow(row);
+      const select = field.querySelector("select");
+      if (!select) {
+        return;
+      }
+      window.requestAnimationFrame(() => {
+        select.focus();
+        if (typeof select.showPicker === "function") {
+          select.showPicker();
+        } else {
+          select.click();
+        }
+      });
+    });
+  });
+  row.querySelectorAll("[data-result-choice]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const resultSelect = row.querySelector('select[name^="result_"]');
+      if (!resultSelect) {
+        return;
+      }
+      resultSelect.value = button.dataset.resultChoice || "";
+      updatePairingDisplay(row);
+      resultSelect.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
 };

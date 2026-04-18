@@ -145,6 +145,41 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertLess(white_index, result_index)
         self.assertLess(result_index, black_index)
 
+    def test_admin_round_cards_render_score_buttons_for_results(self):
+        self._login()
+        response = self.client.post(
+            "/admin/tournaments",
+            data={"name": "Admin Result Buttons Tournament", "event_date": "2026-04-16", "rounds_planned": "1"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            db = get_db()
+            slug = db.execute(
+                "SELECT slug FROM tournament WHERE name = 'Admin Result Buttons Tournament'"
+            ).fetchone()["slug"]
+
+        for index, name in enumerate(("Alpha Example", "Beta Example"), start=1):
+            response = self.client.post(
+                f"/admin/t/{slug}/entries",
+                data={"name": name, "declared_rating": str(1600 - index * 10)},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        self._set_all_entries_active(slug)
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(f"/admin/t/{slug}?open_round=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'data-result-button-group', response.data)
+        self.assertIn(b'data-result-choice="1-0"', response.data)
+        self.assertIn(b'>1/2</button>', response.data)
+        self.assertIn(b'data-result-choice="0-1"', response.data)
+        self.assertIn(b'<select name="result_1">', response.data)
+
     def test_admin_password_hash_is_stored_in_database(self):
         with self.app.app_context():
             db = get_db()

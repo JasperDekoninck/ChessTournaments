@@ -84,12 +84,12 @@
               <input type="hidden" name="board_count" value="{{ panel.board_count }}" data-board-count>
               <div class="pairing-list" data-pairing-list>
                 {% for board in panel.board_rows %}
-                  <div class="pairing-row{% if not board.white_entry_id %} is-empty{% endif %}" data-pairing-row tabindex="0">
+                  <div class="pairing-row{% if not board.white_entry_id %} is-empty{% endif %}" data-pairing-row>
                     <div class="pairing-board">
                       <span data-board-label>Board {{ board.board_no }}</span>
                     </div>
-                    <div class="pairing-side" data-pairing-field>
-                      <span class="pairing-display">{{ board.white_name or "Choose white" }}</span>
+                    <div class="pairing-side" data-pairing-field="white" tabindex="0">
+                      <span class="pairing-display" data-pairing-display="white">{{ board.white_name or "Choose white" }}</span>
                       {% if not tournament.is_historical %}
                         <div class="pairing-edit">
                           <select name="white_{{ board.board_no }}">
@@ -101,8 +101,23 @@
                         </div>
                       {% endif %}
                     </div>
-                    <div class="pairing-result" data-pairing-field>
-                      <span class="pairing-display pairing-result-text">{{ board.result_code or "—" }}</span>
+                    <div class="pairing-result">
+                      <div
+                        class="pairing-result-chooser"
+                        data-result-button-group
+                        role="group"
+                        aria-label="Choose result for board {{ board.board_no }}"
+                        {% if not (board.white_entry_id and board.black_entry_id) %}hidden{% endif %}
+                      >
+                        <button type="button" class="pairing-result-button" data-result-choice="1-0" aria-pressed="false">1-0</button>
+                        <button type="button" class="pairing-result-button" data-result-choice="1/2-1/2" aria-pressed="false">1/2</button>
+                        <button type="button" class="pairing-result-button" data-result-choice="0-1" aria-pressed="false">0-1</button>
+                      </div>
+                      <span
+                        class="pairing-display pairing-result-text"
+                        data-result-label
+                        {% if board.white_entry_id and board.black_entry_id %}hidden{% endif %}
+                      >{{ "BYE" if (board.white_entry_id and not board.black_entry_id) else "—" }}</span>
                       {% if not tournament.is_historical %}
                         <div class="pairing-edit">
                           <select name="result_{{ board.board_no }}">
@@ -114,8 +129,8 @@
                         </div>
                       {% endif %}
                     </div>
-                    <div class="pairing-side pairing-side-right" data-pairing-field>
-                      <span class="pairing-display">{{ board.black_name or "Bye / empty" }}</span>
+                    <div class="pairing-side pairing-side-right" data-pairing-field="black" tabindex="0">
+                      <span class="pairing-display" data-pairing-display="black">{{ board.black_name or "Bye / empty" }}</span>
                       {% if not tournament.is_historical %}
                         <div class="pairing-edit">
                           <select name="black_{{ board.board_no }}">
@@ -132,12 +147,12 @@
               </div>
               {% if not tournament.is_historical %}
                 <template data-empty-board-template>
-                  <div class="pairing-row is-empty" data-pairing-row tabindex="0">
+                  <div class="pairing-row is-empty" data-pairing-row>
                     <div class="pairing-board">
                       <span data-board-label>Board __BOARD__</span>
                     </div>
-                    <div class="pairing-side" data-pairing-field>
-                      <span class="pairing-display">Choose white</span>
+                    <div class="pairing-side" data-pairing-field="white" tabindex="0">
+                      <span class="pairing-display" data-pairing-display="white">Choose white</span>
                       <div class="pairing-edit">
                         <select name="white___BOARD__">
                           <option value="">Choose white</option>
@@ -147,8 +162,19 @@
                         </select>
                       </div>
                     </div>
-                    <div class="pairing-result" data-pairing-field>
-                      <span class="pairing-display pairing-result-text">—</span>
+                    <div class="pairing-result">
+                      <div
+                        class="pairing-result-chooser"
+                        data-result-button-group
+                        role="group"
+                        aria-label="Choose result for board __BOARD__"
+                        hidden
+                      >
+                        <button type="button" class="pairing-result-button" data-result-choice="1-0" aria-pressed="false">1-0</button>
+                        <button type="button" class="pairing-result-button" data-result-choice="1/2-1/2" aria-pressed="false">1/2</button>
+                        <button type="button" class="pairing-result-button" data-result-choice="0-1" aria-pressed="false">0-1</button>
+                      </div>
+                      <span class="pairing-display pairing-result-text" data-result-label>—</span>
                       <div class="pairing-edit">
                         <select name="result___BOARD__">
                           <option value="">—</option>
@@ -158,8 +184,8 @@
                         </select>
                       </div>
                     </div>
-                    <div class="pairing-side pairing-side-right" data-pairing-field>
-                      <span class="pairing-display">Bye / empty</span>
+                    <div class="pairing-side pairing-side-right" data-pairing-field="black" tabindex="0">
+                      <span class="pairing-display" data-pairing-display="black">Bye / empty</span>
                       <div class="pairing-edit">
                         <select name="black___BOARD__">
                           <option value="">Bye / empty</option>

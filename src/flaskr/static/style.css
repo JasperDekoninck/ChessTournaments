@@ -18,6 +18,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   background: var(--bg);
@@ -507,7 +511,6 @@ td form + form {
   gap: 0.8rem;
   padding: 0.85rem 1rem;
   border: 1px solid var(--line);
-  cursor: pointer;
 }
 
 .pairing-row.is-empty {
@@ -532,8 +535,17 @@ td form + form {
   min-width: 0;
 }
 
+.pairing-side {
+  cursor: pointer;
+}
+
 .pairing-side-right {
   text-align: right;
+}
+
+.pairing-side:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0.25rem;
 }
 
 .pairing-display {
@@ -546,10 +558,40 @@ td form + form {
 
 .pairing-result {
   text-align: center;
+  justify-items: center;
 }
 
 .pairing-result-text {
   font-weight: 700;
+}
+
+.pairing-result-chooser {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.pairing-result-button {
+  min-width: 0;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--line-strong);
+  background: white;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1;
+}
+
+.pairing-result-button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pairing-result-button.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
 }
 
 .pairing-edit {
@@ -564,6 +606,10 @@ td form + form {
 
 .pairing-row.is-editing .pairing-display {
   visibility: hidden;
+}
+
+.pairing-row.is-editing .pairing-result-chooser {
+  display: none;
 }
 
 .pairing-row.is-editing .pairing-edit {
@@ -789,6 +835,18 @@ tr.is-waitlist .waitlist-note {
 
 .modal-form {
   width: 100%;
+}
+
+.public-boards-table th,
+.public-boards-table td {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+.public-standings-table th,
+.public-standings-table td {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
 }
 
 .public-boards-table .public-result-col {
