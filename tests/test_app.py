@@ -309,6 +309,64 @@ class TournamentAppTestCase(unittest.TestCase):
             ],
         )
 
+    def test_admin_add_player_uses_registration_fields_and_information_table(self):
+        slug = self._create_tournament(name="Admin Custom Fields Tournament")
+
+        self._login()
+        response = self.client.post(
+            f"/admin/t/{slug}/registration",
+            data={
+                "registration_enabled": "1",
+                "registration_opens_at": "2026-04-15T18:00",
+                "registration_field_type": ["dropdown", "text"],
+                "registration_field_label": ["Gender", "Department"],
+                "registration_field_options": ["Female\nMale\nOther", ""],
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Player information", response.data)
+        self.assertIn(b'name="registration_field_0"', response.data)
+        self.assertIn(b"Gender", response.data)
+        self.assertIn(b"Department", response.data)
+
+        response = self.client.post(
+            f"/admin/t/{slug}/entries",
+            data={
+                "name": "Admin Field Player",
+                "email": "admin-fields@example.com",
+                "declared_rating": "1650",
+                "registration_field_0": "Female",
+                "registration_field_1": "D-MATH",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Admin Field Player", response.data)
+        self.assertIn(b"admin-fields@example.com", response.data)
+        self.assertIn(b"Female", response.data)
+        self.assertIn(b"D-MATH", response.data)
+
+        with self.app.app_context():
+            db = get_db()
+            entry = db.execute(
+                """
+                SELECT registration_answers_json
+                FROM tournament_entry
+                WHERE tournament_id = (SELECT id FROM tournament WHERE slug = ?)
+                  AND imported_name = 'Admin Field Player'
+                """,
+                (slug,),
+            ).fetchone()
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            json.loads(entry["registration_answers_json"]),
+            [
+                {"label": "Gender", "type": "dropdown", "value": "Female"},
+                {"label": "Department", "type": "text", "value": "D-MATH"},
+            ],
+        )
+
     def test_registration_full_warning_does_not_say_inactive(self):
         slug = self._create_tournament(name="Full Registration Warning Tournament")
         self._login()

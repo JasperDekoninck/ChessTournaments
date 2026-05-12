@@ -296,8 +296,65 @@
         Rating (optional)
         <input type="number" name="declared_rating" min="0" max="4000" data-player-rating>
       </label>
+      {% for field in registration_fields %}
+        <label>
+          {{ field.label }}
+          {% if field.type == "dropdown" %}
+            <select name="registration_field_{{ loop.index0 }}" required>
+              <option value="">Choose one</option>
+              {% for option in field.options %}
+                <option value="{{ option }}">{{ option }}</option>
+              {% endfor %}
+            </select>
+          {% else %}
+            <input type="text" name="registration_field_{{ loop.index0 }}" required>
+          {% endif %}
+        </label>
+      {% endfor %}
       <button type="submit">Add player</button>
     </form>
+  {% endif %}
+
+  {% if registration_fields %}
+    <div class="player-information-block">
+      <div class="section-heading">
+        <h3>Player information</h3>
+        <small>Registration details and current score</small>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Player</th>
+              <th>Email</th>
+              <th>Rating</th>
+              <th>Score</th>
+              {% for field in registration_fields %}
+                <th>{{ field.label }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in player_information_rows %}
+              {% set entry = row.entry %}
+              <tr>
+                <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=entry.id) }}">{{ entry.imported_name }}</a></td>
+                <td>{{ entry.imported_email or entry.player_email or "—" }}</td>
+                <td>{{ entry.seed_rating }}</td>
+                <td data-player-info-score="{{ entry.id }}">{{ "%.1f"|format(row.score) }}</td>
+                {% for value in row.field_values %}
+                  <td>{{ value or "—" }}</td>
+                {% endfor %}
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="{{ 4 + registration_fields|length }}">No players yet.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   {% endif %}
 </section>
 

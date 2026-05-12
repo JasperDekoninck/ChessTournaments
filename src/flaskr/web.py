@@ -212,6 +212,73 @@ def _tournament_standings_csv(tournament) -> str:
     return output.getvalue()
 
 
+def _registration_answers_from_request(registration_fields: list[dict]) -> tuple[list[dict], str | None]:
+    answers = []
+    for index, field in enumerate(registration_fields):
+        value = (request.form.get(f"registration_field_{index}") or "").strip()
+        if not value:
+            return [], f"{field['label']} is required."
+        if field["type"] == "dropdown" and value not in field["options"]:
+            return [], f"Choose a valid value for {field['label']}."
+        answers.append(
+            {
+                "label": field["label"],
+                "type": field["type"],
+                "value": value,
+            }
+        )
+    return answers, None
+
+
+def _parse_registration_answers(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        raw_answers = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw_answers, list):
+        return []
+    answers = []
+    for raw in raw_answers:
+        if not isinstance(raw, dict):
+            continue
+        label = " ".join(str(raw.get("label") or "").split())
+        answer_value = str(raw.get("value") or "").strip()
+        if not label or not answer_value:
+            continue
+        answers.append(
+            {
+                "label": label,
+                "type": (raw.get("type") or "text").strip().lower(),
+                "value": answer_value,
+            }
+        )
+    return answers
+
+
+def _player_information_rows(entries, standings_by_entry: dict, registration_fields: list[dict]) -> list[dict]:
+    rows = []
+    for entry in entries:
+        answers = _parse_registration_answers(entry["registration_answers_json"])
+        answers_by_label = {answer["label"].casefold(): answer["value"] for answer in answers}
+        field_values = []
+        for index, field in enumerate(registration_fields):
+            value = answers_by_label.get(field["label"].casefold())
+            if value is None and index < len(answers):
+                value = answers[index]["value"]
+            field_values.append(value or "")
+        standing = standings_by_entry.get(entry["id"])
+        rows.append(
+            {
+                "entry": entry,
+                "score": float(standing["score"]) if standing else 0.0,
+                "field_values": field_values,
+            }
+        )
+    return rows
+
+
 def _entry_state_payload(db, entry_id: int) -> dict | None:
     entry = db.execute(
         """
@@ -511,22 +578,10 @@ def submit_registration(slug: str):
         return redirect(url_for("web.register"))
 
     registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
-    registration_answers = []
-    for index, field in enumerate(registration_fields):
-        value = (request.form.get(f"registration_field_{index}") or "").strip()
-        if not value:
-            flash_error(f"{field['label']} is required.")
-            return redirect(url_for("web.register"))
-        if field["type"] == "dropdown" and value not in field["options"]:
-            flash_error(f"Choose a valid value for {field['label']}.")
-            return redirect(url_for("web.register"))
-        registration_answers.append(
-            {
-                "label": field["label"],
-                "type": field["type"],
-                "value": value,
-            }
-        )
+    registration_answers, registration_error = _registration_answers_from_request(registration_fields)
+    if registration_error:
+        flash_error(registration_error)
+        return redirect(url_for("web.register"))
 
     row = {
         "name": name,
@@ -813,6 +868,14 @@ def add_entry(slug: str):
         "submitted_at": None,
         "declared_rating": parse_int(request.form.get("declared_rating"), default=None),
     }
+    registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
+    registration_answers, registration_error = _registration_answers_from_request(registration_fields)
+    if registration_error:
+        flash_error(registration_error)
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    row["registration_answers_json"] = (
+        json.dumps(registration_answers, ensure_ascii=True) if registration_answers else None
+    )
     attach_entries_to_tournament(db, tournament["id"], [row], build_matcher())
     flash_success(f"Added {name}.")
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
@@ -894,6 +957,7 @@ def admin_tournament_detail(slug: str):
     availability = fetch_availability(db, tournament["id"])
     standings = compute_standings(db, tournament["id"])
     standings_by_entry = {row["entry_id"]: row for row in standings}
+    registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
     round_panels = _round_panels(tournament, entries, availability)
     open_round = parse_int(request.args.get("open_round"), default=None)
     latest_round, next_round, editable_round = _tournament_round_meta(db, tournament)
@@ -905,7 +969,8 @@ def admin_tournament_detail(slug: str):
     return render_template(
         "admin_tournament.html",
         tournament=tournament,
-        registration_fields=parse_registration_form_fields(tournament["registration_form_json"]),
+        registration_fields=registration_fields,
+        player_information_rows=_player_information_rows(entries, standings_by_entry, registration_fields),
         entries=entries,
         registration_summary=registration_counts(db, tournament["id"]),
         availability=availability,

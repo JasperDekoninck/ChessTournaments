@@ -202,6 +202,9 @@ const applyEntryUpdates = (roundNo, entryUpdates) => {
     if (scoreCell) {
       scoreCell.textContent = formatStandingValue(entry.score);
     }
+    document.querySelectorAll(`[data-player-info-score="${entry.id}"]`).forEach((cell) => {
+      cell.textContent = formatStandingValue(entry.score);
+    });
     if (bhCell) {
       bhCell.textContent = formatStandingValue(entry.bh);
     }

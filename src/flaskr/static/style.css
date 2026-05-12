@@ -722,6 +722,10 @@ td form + form {
   text-align: center;
 }
 
+.player-information-block {
+  margin-top: 1.5rem;
+}
+
 .waitlist-note {
   display: block;
   color: var(--muted);

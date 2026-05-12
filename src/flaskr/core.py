@@ -1001,15 +1001,19 @@ def attach_entries_to_tournament(db, tournament_id: int, imported_rows: list[dic
             """
             INSERT INTO tournament_entry (
               tournament_id, player_id, imported_name, imported_email, submitted_at,
-              declared_rating, seed_rating, member_status, is_active
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              declared_rating, seed_rating, member_status, is_active, registration_answers_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(tournament_id, player_id) DO UPDATE SET
               imported_name = excluded.imported_name,
               imported_email = excluded.imported_email,
               submitted_at = excluded.submitted_at,
               declared_rating = excluded.declared_rating,
               seed_rating = excluded.seed_rating,
-              member_status = excluded.member_status
+              member_status = excluded.member_status,
+              registration_answers_json = COALESCE(
+                excluded.registration_answers_json,
+                tournament_entry.registration_answers_json
+              )
             """,
             (
                 tournament_id,
@@ -1021,6 +1025,7 @@ def attach_entries_to_tournament(db, tournament_id: int, imported_rows: list[dic
                 seed_rating,
                 match.member_status,
                 1 if default_active else 0,
+                row.get("registration_answers_json"),
             ),
         )
         entry_id = db.execute(
