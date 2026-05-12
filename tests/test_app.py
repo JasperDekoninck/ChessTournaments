@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import random
 import tempfile
 import unittest
 from io import BytesIO
@@ -10,7 +11,15 @@ from pathlib import Path
 
 from flaskr import create_app
 from flaskr.auth import hash_password
-from flaskr.core import _pair_group, fetch_pairings
+from flaskr.core import (
+    _pair_group,
+    compute_standings,
+    ensure_round_status_rows,
+    fetch_availability,
+    fetch_pairings,
+    generate_swiss_pairings,
+    replace_round_pairings,
+)
 from flaskr.db import get_db, init_db
 from flaskr.rating_integration import get_player_history, get_player_profile, import_rating_history, sync_member_statuses
 from rating import Manager, PlayerDatabase
@@ -245,7 +254,7 @@ class TournamentAppTestCase(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"spot is confirmed", response.data)
+        self.assertIn(b"successfully registered", response.data)
 
         response = self.client.post(
             f"/register/{slug}",
@@ -310,7 +319,7 @@ class TournamentAppTestCase(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"spot is confirmed", response.data)
+        self.assertIn(b"successfully registered", response.data)
 
         with self.app.app_context():
             db = get_db()
@@ -437,7 +446,7 @@ class TournamentAppTestCase(unittest.TestCase):
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"spot is confirmed", response.data)
+        self.assertIn(b"successfully registered", response.data)
 
         response = self.client.post(
             f"/register/{slug}",
@@ -607,6 +616,39 @@ class TournamentAppTestCase(unittest.TestCase):
                 (tournament["id"],),
             ).fetchone()
         self.assertEqual(snapshot_rows["c"], entry_count["c"])
+
+    def test_complete_tournament_rejects_unfinished_round(self):
+        self._login()
+        response = self.client.post(
+            "/admin/tournaments",
+            data={"name": "Unfinished Completion Tournament", "event_date": "2026-04-16", "rounds_planned": "1"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            db = get_db()
+            slug = db.execute(
+                "SELECT slug FROM tournament WHERE name = 'Unfinished Completion Tournament'"
+            ).fetchone()["slug"]
+        for name in ("Alice Example", "Bob Example"):
+            response = self.client.post(
+                f"/admin/t/{slug}/entries",
+                data={"name": name, "declared_rating": "1600"},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+        self._set_all_entries_active(slug)
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(f"/admin/t/{slug}/complete", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Enter all results for round 1 before finishing", response.data)
+
+        with self.app.app_context():
+            db = get_db()
+            status = db.execute("SELECT status FROM tournament WHERE slug = ?", (slug,)).fetchone()["status"]
+        self.assertEqual(status, "running")
 
     def test_completed_public_tournament_shows_final_highlights(self):
         slug = self._create_tournament(name="Highlights Tournament")
@@ -1096,6 +1138,88 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Use BYE only for boards without an opponent.", response.data)
 
+    def test_manual_round_save_allows_repeat_pairing_override(self):
+        self._login()
+        response = self.client.post(
+            "/admin/tournaments",
+            data={"name": "Repeat Pairing Validation Tournament", "event_date": "2026-04-16", "rounds_planned": "2"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            db = get_db()
+            slug = db.execute(
+                "SELECT slug FROM tournament WHERE name = 'Repeat Pairing Validation Tournament'"
+            ).fetchone()["slug"]
+
+        for index, name in enumerate(("Alice Example", "Bob Example", "Cara Example", "Dan Example"), start=1):
+            response = self.client.post(
+                f"/admin/t/{slug}/entries",
+                data={"name": name, "declared_rating": str(1700 - index * 10)},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        self._set_all_entries_active(slug)
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            db = get_db()
+            tournament = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()
+            round_one = fetch_pairings(db, tournament["id"], 1)
+
+        form = {"board_count": str(len(round_one))}
+        for pairing in round_one:
+            form[f"white_{pairing['board_no']}"] = str(pairing["white_entry_id"])
+            form[f"black_{pairing['board_no']}"] = str(pairing["black_entry_id"])
+            form[f"result_{pairing['board_no']}"] = "1-0"
+        response = self.client.post(f"/admin/t/{slug}/round/1/save", data=form, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(f"/admin/t/{slug}/round/2/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        repeated = round_one[0]
+        remaining_ids = {
+            pairing["white_entry_id"]
+            for pairing in round_one
+        } | {
+            pairing["black_entry_id"]
+            for pairing in round_one
+            if pairing["black_entry_id"] is not None
+        }
+        remaining_ids -= {repeated["white_entry_id"], repeated["black_entry_id"]}
+        other_white, other_black = sorted(remaining_ids)
+        response = self.client.post(
+            f"/admin/t/{slug}/round/2/save",
+            data={
+                "board_count": "2",
+                "white_1": str(repeated["white_entry_id"]),
+                "black_1": str(repeated["black_entry_id"]),
+                "result_1": "1-0",
+                "white_2": str(other_white),
+                "black_2": str(other_black),
+                "result_2": "1/2-1/2",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"This manual override repeats an earlier pairing.", response.data)
+        with self.app.app_context():
+            db = get_db()
+            repeated_round_two = db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM pairing
+                WHERE tournament_id = (SELECT id FROM tournament WHERE slug = ?)
+                  AND round_no = 2
+                  AND white_entry_id = ?
+                  AND black_entry_id = ?
+                  AND manual_override = 1
+                """,
+                (slug, repeated["white_entry_id"], repeated["black_entry_id"]),
+            ).fetchone()["count"]
+        self.assertEqual(repeated_round_two, 1)
+
     def test_manual_add_defaults_seed_rating_to_1500_when_missing(self):
         slug = self._create_tournament(name="Manual Default Rating Tournament")
         self._login()
@@ -1328,6 +1452,345 @@ class TournamentAppTestCase(unittest.TestCase):
         pairs = _pair_group(group)
         paired_ids = {frozenset((white["entry_id"], black["entry_id"])) for white, black in pairs}
         self.assertEqual(paired_ids, {frozenset((1, 3)), frozenset((2, 4))})
+
+    def test_pair_group_avoids_same_absolute_colour_preferences(self):
+        group = [
+            {
+                "entry_id": 1,
+                "name": "Alpha",
+                "score": 1.0,
+                "seed_rating": 2100,
+                "opponent_ids": set(),
+                "white_games": 2,
+                "black_games": 0,
+                "colors": ["W", "W"],
+                "color_rounds": [(1, "W"), (2, "W")],
+            },
+            {
+                "entry_id": 2,
+                "name": "Bravo",
+                "score": 1.0,
+                "seed_rating": 2090,
+                "opponent_ids": set(),
+                "white_games": 0,
+                "black_games": 2,
+                "colors": ["B", "B"],
+                "color_rounds": [(1, "B"), (2, "B")],
+            },
+            {
+                "entry_id": 3,
+                "name": "Charlie",
+                "score": 1.0,
+                "seed_rating": 1900,
+                "opponent_ids": set(),
+                "white_games": 2,
+                "black_games": 0,
+                "colors": ["W", "W"],
+                "color_rounds": [(1, "W"), (2, "W")],
+            },
+            {
+                "entry_id": 4,
+                "name": "Delta",
+                "score": 1.0,
+                "seed_rating": 1890,
+                "opponent_ids": set(),
+                "white_games": 0,
+                "black_games": 2,
+                "colors": ["B", "B"],
+                "color_rounds": [(1, "B"), (2, "B")],
+            },
+        ]
+
+        pairs = _pair_group(group)
+        paired_ids = {frozenset((white["entry_id"], black["entry_id"])) for white, black in pairs}
+        self.assertEqual(paired_ids, {frozenset((1, 4)), frozenset((2, 3))})
+
+    def test_pair_group_corrects_absolute_colour_streaks(self):
+        group = [
+            {
+                "entry_id": 1,
+                "name": "Alpha",
+                "score": 1.0,
+                "seed_rating": 2100,
+                "opponent_ids": set(),
+                "white_games": 2,
+                "black_games": 0,
+                "colors": ["W", "W"],
+                "color_rounds": [(1, "W"), (2, "W")],
+            },
+            {
+                "entry_id": 2,
+                "name": "Bravo",
+                "score": 1.0,
+                "seed_rating": 2000,
+                "opponent_ids": set(),
+                "white_games": 0,
+                "black_games": 2,
+                "colors": ["B", "B"],
+                "color_rounds": [(1, "B"), (2, "B")],
+            },
+        ]
+
+        pairs = _pair_group(group)
+        self.assertEqual(len(pairs), 1)
+        white, black = pairs[0]
+        self.assertEqual(white["entry_id"], 2)
+        self.assertEqual(black["entry_id"], 1)
+
+    def test_generate_swiss_pairings_does_not_repeat_pairing_allocated_bye(self):
+        with self.app.app_context():
+            db = get_db()
+            cursor = db.execute(
+                """
+                INSERT INTO tournament (
+                  name, slug, event_date, rounds_planned, status, source_type,
+                  primary_tiebreak_label, secondary_tiebreak_label
+                ) VALUES ('Bye Test', 'bye-test', '2026-04-16', 3, 'running', 'local', 'BH', 'BH-C1')
+                """
+            )
+            tournament_id = cursor.lastrowid
+            entry_ids = []
+            for index, name in enumerate(["Alpha", "Bravo", "Charlie", "Delta", "Echo"], start=1):
+                player_cursor = db.execute(
+                    """
+                    INSERT INTO player (
+                      name, normalized_name, email, canonical_rating_name, member_status,
+                      historical_rating, rating_deviation, historical_wins, historical_losses, historical_draws
+                    ) VALUES (?, ?, NULL, ?, 'non-member', NULL, NULL, 0, 0, 0)
+                    """,
+                    (name, name.lower(), name),
+                )
+                entry_cursor = db.execute(
+                    """
+                    INSERT INTO tournament_entry (
+                      tournament_id, player_id, imported_name, seed_rating, member_status, is_active
+                    ) VALUES (?, ?, ?, ?, 'non-member', 1)
+                    """,
+                    (tournament_id, player_cursor.lastrowid, name, 2200 - index * 10),
+                )
+                entry_ids.append(entry_cursor.lastrowid)
+            db.commit()
+            ensure_round_status_rows(db, tournament_id, 3)
+            replace_round_pairings(
+                db,
+                tournament_id,
+                1,
+                [
+                    {"board_no": 1, "white_entry_id": entry_ids[0], "black_entry_id": entry_ids[3], "result_code": "1/2-1/2"},
+                    {"board_no": 2, "white_entry_id": entry_ids[1], "black_entry_id": entry_ids[2], "result_code": "1/2-1/2"},
+                    {"board_no": 3, "white_entry_id": entry_ids[4], "black_entry_id": None, "result_code": "BYE"},
+                ],
+            )
+
+            round_two = generate_swiss_pairings(db, tournament_id, 2)
+
+        bye_rows = [pairing for pairing in round_two if pairing["black_entry_id"] is None]
+        self.assertEqual(len(bye_rows), 1)
+        self.assertNotEqual(bye_rows[0]["white_entry_id"], entry_ids[4])
+
+    def test_buchholz_handles_withdrawals_and_pairing_allocated_byes(self):
+        with self.app.app_context():
+            db = get_db()
+            cursor = db.execute(
+                """
+                INSERT INTO tournament (
+                  name, slug, event_date, rounds_planned, status, source_type,
+                  primary_tiebreak_label, secondary_tiebreak_label
+                ) VALUES ('Tie Break Test', 'tie-break-test', '2026-04-16', 3, 'completed', 'local', 'BH', 'BH-C1')
+                """
+            )
+            tournament_id = cursor.lastrowid
+            entry_ids = {}
+            for index, name in enumerate(["Alpha", "Bravo", "Charlie", "Delta"], start=1):
+                player_cursor = db.execute(
+                    """
+                    INSERT INTO player (
+                      name, normalized_name, email, canonical_rating_name, member_status,
+                      historical_rating, rating_deviation, historical_wins, historical_losses, historical_draws
+                    ) VALUES (?, ?, NULL, ?, 'non-member', NULL, NULL, 0, 0, 0)
+                    """,
+                    (name, name.lower(), name),
+                )
+                entry_cursor = db.execute(
+                    """
+                    INSERT INTO tournament_entry (
+                      tournament_id, player_id, imported_name, seed_rating, member_status, is_active
+                    ) VALUES (?, ?, ?, ?, 'non-member', ?)
+                    """,
+                    (tournament_id, player_cursor.lastrowid, name, 2200 - index * 10, 0 if name == "Delta" else 1),
+                )
+                entry_ids[name] = entry_cursor.lastrowid
+            db.commit()
+            ensure_round_status_rows(db, tournament_id, 3)
+            db.execute(
+                """
+                UPDATE entry_round_status
+                SET is_available = 0
+                WHERE entry_id = ? AND round_no = 3
+                """,
+                (entry_ids["Delta"],),
+            )
+            replace_round_pairings(
+                db,
+                tournament_id,
+                1,
+                [
+                    {"board_no": 1, "white_entry_id": entry_ids["Alpha"], "black_entry_id": entry_ids["Delta"], "result_code": "1-0"},
+                    {"board_no": 2, "white_entry_id": entry_ids["Bravo"], "black_entry_id": entry_ids["Charlie"], "result_code": "1-0"},
+                ],
+            )
+            replace_round_pairings(
+                db,
+                tournament_id,
+                2,
+                [
+                    {"board_no": 1, "white_entry_id": entry_ids["Alpha"], "black_entry_id": entry_ids["Charlie"], "result_code": "1-0"},
+                    {"board_no": 2, "white_entry_id": entry_ids["Bravo"], "black_entry_id": entry_ids["Delta"], "result_code": "1-0"},
+                ],
+            )
+            replace_round_pairings(
+                db,
+                tournament_id,
+                3,
+                [
+                    {"board_no": 1, "white_entry_id": entry_ids["Alpha"], "black_entry_id": entry_ids["Bravo"], "result_code": "1-0"},
+                    {"board_no": 2, "white_entry_id": entry_ids["Charlie"], "black_entry_id": None, "result_code": "BYE"},
+                ],
+            )
+
+            rows = {row["name"]: row for row in compute_standings(db, tournament_id, prefer_stored=False)}
+
+        self.assertEqual(rows["Alpha"]["score"], 3.0)
+        self.assertEqual(rows["Bravo"]["score"], 2.0)
+        self.assertEqual(rows["Charlie"]["score"], 1.0)
+        self.assertEqual(rows["Delta"]["score"], 0.0)
+        self.assertEqual(rows["Alpha"]["bh"], 3.5)
+        self.assertEqual(rows["Bravo"]["bh"], 4.5)
+        self.assertEqual(rows["Charlie"]["bh"], 6.0)
+        self.assertEqual(rows["Charlie"]["bh_c1"], 5.0)
+        self.assertEqual(rows["Delta"]["bh"], 5.0)
+        self.assertEqual(rows["Delta"]["bh_c1"], 5.0)
+
+    def test_random_tournaments_with_absences_and_withdrawals_keep_pairing_invariants(self):
+        def create_random_tournament(db, seed: int) -> tuple[int, list[int]]:
+            cursor = db.execute(
+                """
+                INSERT INTO tournament (
+                  name, slug, event_date, rounds_planned, status, source_type,
+                  primary_tiebreak_label, secondary_tiebreak_label
+                ) VALUES (?, ?, '2026-04-16', 7, 'running', 'local', 'BH', 'BH-C1')
+                """,
+                (f"Random Tournament {seed}", f"random-tournament-{seed}"),
+            )
+            tournament_id = cursor.lastrowid
+            entry_ids = []
+            for index in range(1, 49):
+                name = f"Random {seed}-{index:02d}"
+                player_cursor = db.execute(
+                    """
+                    INSERT INTO player (
+                      name, normalized_name, email, canonical_rating_name, member_status,
+                      historical_rating, rating_deviation, historical_wins, historical_losses, historical_draws
+                    ) VALUES (?, ?, NULL, ?, 'non-member', NULL, NULL, 0, 0, 0)
+                    """,
+                    (name, name.lower(), name),
+                )
+                entry_cursor = db.execute(
+                    """
+                    INSERT INTO tournament_entry (
+                      tournament_id, player_id, imported_name, seed_rating, member_status, is_active
+                    ) VALUES (?, ?, ?, ?, 'non-member', 1)
+                    """,
+                    (tournament_id, player_cursor.lastrowid, name, 2200 - index),
+                )
+                entry_ids.append(entry_cursor.lastrowid)
+            db.commit()
+            ensure_round_status_rows(db, tournament_id, 7)
+            return tournament_id, entry_ids
+
+        def validate_boards(db, tournament_id: int, round_no: int, boards: list[dict], previous_pairs: set[frozenset[int]]):
+            availability = fetch_availability(db, tournament_id)
+            seen = set()
+            byes = []
+            for board in boards:
+                white_id = board["white_entry_id"]
+                black_id = board["black_entry_id"]
+                self.assertNotIn(white_id, seen)
+                seen.add(white_id)
+                self.assertTrue(availability.get(white_id, {}).get(round_no, True))
+                if black_id is None:
+                    byes.append(white_id)
+                    continue
+                self.assertNotIn(black_id, seen)
+                seen.add(black_id)
+                self.assertTrue(availability.get(black_id, {}).get(round_no, True))
+                pair_key = frozenset((white_id, black_id))
+                self.assertNotIn(pair_key, previous_pairs)
+                previous_pairs.add(pair_key)
+            self.assertLessEqual(len(byes), 1)
+
+        with self.app.app_context():
+            db = get_db()
+            for seed in range(20):
+                rng = random.Random(seed)
+                tournament_id, entry_ids = create_random_tournament(db, seed)
+                previous_pairs: set[frozenset[int]] = set()
+                bye_counts = {entry_id: 0 for entry_id in entry_ids}
+                withdrawn = set()
+                for round_no in range(1, 8):
+                    for entry_id in entry_ids:
+                        if entry_id in withdrawn:
+                            db.execute(
+                                "UPDATE entry_round_status SET is_available = 0 WHERE entry_id = ? AND round_no = ?",
+                                (entry_id, round_no),
+                            )
+                            continue
+                        if round_no >= 3 and rng.random() < 0.025:
+                            withdrawn.add(entry_id)
+                            db.execute("UPDATE tournament_entry SET is_active = 0 WHERE id = ?", (entry_id,))
+                            db.execute(
+                                "UPDATE entry_round_status SET is_available = 0 WHERE entry_id = ? AND round_no >= ?",
+                                (entry_id, round_no),
+                            )
+                            continue
+                        if rng.random() < 0.08:
+                            db.execute(
+                                "UPDATE entry_round_status SET is_available = 0 WHERE entry_id = ? AND round_no = ?",
+                                (entry_id, round_no),
+                            )
+                    db.commit()
+
+                    available_count = db.execute(
+                        """
+                        SELECT COUNT(*) AS c
+                        FROM tournament_entry e
+                        JOIN entry_round_status ers ON ers.entry_id = e.id AND ers.round_no = ?
+                        WHERE e.tournament_id = ? AND e.is_active = 1 AND ers.is_available = 1
+                        """,
+                        (round_no, tournament_id),
+                    ).fetchone()["c"]
+                    boards = generate_swiss_pairings(db, tournament_id, round_no)
+                    if available_count >= 2:
+                        self.assertTrue(boards, f"seed={seed} round={round_no} available={available_count}")
+                    validate_boards(db, tournament_id, round_no, boards, previous_pairs)
+
+                    for board in boards:
+                        if board["black_entry_id"] is None:
+                            bye_counts[board["white_entry_id"]] += 1
+                            board["result_code"] = "BYE"
+                            continue
+                        board["result_code"] = rng.choice(["1-0", "0-1", "1/2-1/2"])
+                    replace_round_pairings(db, tournament_id, round_no, boards)
+
+                rows = compute_standings(db, tournament_id, prefer_stored=False)
+                self.assertEqual(len(rows), 48)
+                self.assertEqual([row["rank"] for row in rows], list(range(1, 49)))
+                for row in rows:
+                    self.assertGreaterEqual(row["score"], 0.0)
+                    self.assertLessEqual(row["score"], 7.0)
+                    self.assertGreaterEqual(row["bh"], row["bh_c1"])
+                    self.assertGreaterEqual(row["bh_c1"], 0.0)
+                self.assertLessEqual(max(bye_counts.values()), 1)
 
     def test_toggle_public_homepage_redirects_back_to_tournament_page(self):
         slug = self._create_tournament(name="Homepage Toggle Tournament")

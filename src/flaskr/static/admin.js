@@ -366,7 +366,7 @@ const initRoundEditors = () => {
         if (!response.ok || !payload.ok) {
           throw new Error(payload.message || "Save failed.");
         }
-        setSaveStatus(form, "");
+        setSaveStatus(form, payload.warning || "");
         applyEntryUpdates(Number(form.dataset.roundNo), payload.entry_updates);
         updateGenerateForms(payload.next_round);
       } catch (error) {

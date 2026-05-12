@@ -222,7 +222,6 @@
             </span>
           </th>
           <th>Member</th>
-          <th>Seed</th>
           <th>Status</th>
           <th>
             <span class="sortable-header">
@@ -258,7 +257,6 @@
               {% endif %}
             </td>
             <td>{{ "✅" if entry.member_status == "member" else "❌" }}</td>
-            <td>{{ entry.seed_rating }}</td>
             <td>
               {% if tournament.is_historical %}
                 <span class="status-pill {{ 'status-waitlist' if entry.waitlist_position else ('status-on' if entry.is_active else 'status-off') }}">

@@ -337,6 +337,23 @@ def _round_is_locked(db, tournament, round_no: int) -> bool:
     return pairings_complete(db, tournament["id"], round_no)
 
 
+def _repeat_pairing_warning(db, tournament_id: int, round_no: int, boards: list[dict]) -> str | None:
+    previous_pairs = {
+        frozenset((pairing["white_entry_id"], pairing["black_entry_id"]))
+        for pairing in fetch_pairings(db, tournament_id)
+        if pairing["round_no"] != round_no
+        and pairing["white_entry_id"] is not None
+        and pairing["black_entry_id"] is not None
+    }
+    for board in boards:
+        if board.get("black_entry_id") is None:
+            continue
+        pair_key = frozenset((board["white_entry_id"], board["black_entry_id"]))
+        if pair_key in previous_pairs:
+            return "This manual override repeats an earlier pairing."
+    return None
+
+
 def _entry_row_payload(db, tournament, entry_id: int) -> dict | None:
     entry_state = _entry_state_payload(db, entry_id)
     if entry_state is None:
@@ -1227,7 +1244,7 @@ def generate_round(slug: str, round_no: int):
         return redirect(_admin_tournament_url(slug, round_no))
     boards = generate_swiss_pairings(db, tournament["id"], round_no)
     if not boards:
-        flash_warning("Not enough available players to generate pairings.")
+        flash_warning("Not enough available players, or no legal FIDE Dutch pairing was found.")
     else:
         replace_round_pairings(db, tournament["id"], round_no, boards)
         db.execute(
@@ -1270,6 +1287,7 @@ def save_round(slug: str, round_no: int):
             return jsonify({"ok": False, "message": str(exc)}), 400
         flash_error(str(exc))
         return redirect(_admin_tournament_url(slug, round_no))
+    repeat_warning = _repeat_pairing_warning(db, tournament["id"], round_no, boards)
     replace_round_pairings(db, tournament["id"], round_no, boards, manual_override=True)
     db.execute(
         "UPDATE tournament SET status = CASE WHEN status = 'draft' THEN 'running' ELSE status END WHERE id = ?",
@@ -1279,8 +1297,12 @@ def save_round(slug: str, round_no: int):
     sync_member_statuses(db)
     if _wants_json():
         payload = {"ok": True, "message": f"Round {round_no} saved."}
+        if repeat_warning:
+            payload["warning"] = repeat_warning
         payload.update(_admin_round_updates_payload(db, tournament, round_no))
         return jsonify(payload)
+    if repeat_warning:
+        flash_warning(repeat_warning)
     flash_success(f"Saved round {round_no}.")
     return redirect(_admin_tournament_url(slug, round_no))
 
@@ -1293,6 +1315,10 @@ def complete_tournament(slug: str):
     tournament = _tournament_or_404(slug)
     if not _ensure_editable(tournament):
         return redirect(_admin_tournament_url(slug, open_round))
+    latest_round = latest_paired_round(db, tournament["id"])
+    if latest_round is not None and not pairings_complete(db, tournament["id"], latest_round):
+        flash_warning(f"Enter all results for round {latest_round} before finishing the tournament.")
+        return redirect(_admin_tournament_url(slug, latest_round))
     db.execute("UPDATE tournament SET status = 'completed' WHERE id = ?", (tournament["id"],))
     db.commit()
     persist_final_standings(db, tournament["id"])
