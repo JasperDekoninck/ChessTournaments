@@ -145,6 +145,41 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertLess(white_index, result_index)
         self.assertLess(result_index, black_index)
 
+    def test_admin_round_cards_render_score_buttons_for_results(self):
+        self._login()
+        response = self.client.post(
+            "/admin/tournaments",
+            data={"name": "Admin Result Buttons Tournament", "event_date": "2026-04-16", "rounds_planned": "1"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            db = get_db()
+            slug = db.execute(
+                "SELECT slug FROM tournament WHERE name = 'Admin Result Buttons Tournament'"
+            ).fetchone()["slug"]
+
+        for index, name in enumerate(("Alpha Example", "Beta Example"), start=1):
+            response = self.client.post(
+                f"/admin/t/{slug}/entries",
+                data={"name": name, "declared_rating": str(1600 - index * 10)},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        self._set_all_entries_active(slug)
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(f"/admin/t/{slug}?open_round=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'data-result-button-group', response.data)
+        self.assertIn(b'data-result-choice="1-0"', response.data)
+        self.assertIn(b'>1/2</button>', response.data)
+        self.assertIn(b'data-result-choice="0-1"', response.data)
+        self.assertIn(b'<select name="result_1">', response.data)
+
     def test_admin_password_hash_is_stored_in_database(self):
         with self.app.app_context():
             db = get_db()
@@ -1314,6 +1349,9 @@ class TournamentAppTestCase(unittest.TestCase):
 
     def test_player_history_page_shows_profile_summary(self):
         slug = self._create_tournament(name="Profile Summary Tournament")
+        self._publish_tournament(slug)
+        with self.client.session_transaction() as session:
+            session.clear()
         with self.app.app_context():
             db = get_db()
             entry_id = db.execute(
@@ -1328,6 +1366,35 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertIn(b"Wins:", response.data)
         self.assertIn(b"Losses:", response.data)
         self.assertIn(b"Draws:", response.data)
+        self.assertNotIn(b"Email:", response.data)
+
+    def test_player_history_page_shows_email_only_to_admin(self):
+        slug = self._create_tournament(name="Admin Email Visibility Tournament")
+        self._publish_tournament(slug)
+        with self.client.session_transaction() as session:
+            session.clear()
+        with self.app.app_context():
+            db = get_db()
+            row = db.execute(
+                """
+                SELECT id, imported_email
+                FROM tournament_entry
+                WHERE tournament_id = (SELECT id FROM tournament WHERE slug = ?)
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (slug,),
+            ).fetchone()
+        response = self.client.get(f"/t/{slug}/player/{row['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Email:", response.data)
+        self.assertNotIn(row["imported_email"].encode("utf-8"), response.data)
+
+        self._login()
+        response = self.client.get(f"/t/{slug}/player/{row['id']}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Email:", response.data)
+        self.assertIn(row["imported_email"].encode("utf-8"), response.data)
 
     def test_import_rating_history_syncs_rounds_from_source_csv(self):
         source_root = Path(self.tempdir.name) / "source"

@@ -8,6 +8,9 @@
   {% if profile %}
     <div class="profile-summary">
       <span><strong>Rating:</strong> {{ profile.rating if profile.rating is not none else "—" }}</span>
+      {% if admin_email %}
+        <span><strong>Email:</strong> {{ admin_email }}</span>
+      {% endif %}
       <span><strong>Games:</strong> {{ profile.games }}</span>
       <span><strong>Wins:</strong> {{ profile.wins }}</span>
       <span><strong>Losses:</strong> {{ profile.losses }}</span>

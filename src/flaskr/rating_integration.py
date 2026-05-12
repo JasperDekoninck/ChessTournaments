@@ -48,6 +48,8 @@ MEMBER_SINCE_KEY = "member_since_date"
 _MANAGER_CACHE: dict[str, tuple[int | None, Manager]] = {}
 _CSV_CACHE: dict[str, tuple[int | None, list[dict]]] = {}
 _TOURNAMENT_INSIGHTS_CACHE: dict[tuple[int | None, str, str], dict | None] = {}
+_MANAGER_PLAYER_INDEX_CACHE: dict[tuple[int | None, int], dict] = {}
+_PLAYER_VIEW_CACHE: dict[tuple[int | None, int], dict] = {}
 
 
 @dataclass
@@ -85,7 +87,16 @@ def _ensure_rating_dir():
     Path(current_app.config["EXPORT_DIR"]).mkdir(parents=True, exist_ok=True)
 
 
+def _clear_runtime_caches():
+    _MANAGER_CACHE.clear()
+    _CSV_CACHE.clear()
+    _TOURNAMENT_INSIGHTS_CACHE.clear()
+    _MANAGER_PLAYER_INDEX_CACHE.clear()
+    _PLAYER_VIEW_CACHE.clear()
+
+
 def import_rating_history(source_repo: str):
+    _clear_runtime_caches()
     _ensure_rating_dir()
     source = Path(source_repo)
     shutil.copy2(source / "data" / "databases.json", _manager_path("baseline"))
@@ -865,6 +876,7 @@ def sync_historical_tournaments_from_saved_source() -> int:
 
 
 def rebuild_current_manager(db):
+    _clear_runtime_caches()
     _ensure_rating_dir()
     manager = baseline_manager().clone()
     local_tournaments = db.execute(
@@ -942,7 +954,7 @@ def rebuild_current_manager(db):
 
     manager.update_rating()
     manager.save(str(_manager_path("current")))
-    _MANAGER_CACHE.pop("current", None)
+    _clear_runtime_caches()
     sync_player_profiles_from_manager(db, manager)
     sync_member_statuses(db)
 
@@ -986,9 +998,28 @@ def rebuild_current_manager(db):
         )
     db.commit()
     return anonymous
+def _manager_player_index(manager: Manager, stamp: int | None) -> dict:
+    cache_key = (stamp, id(manager))
+    cached = _MANAGER_PLAYER_INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    normalized_map = {}
+    names = []
+    players_by_name = {}
+    for player in manager.player_database:
+        names.append(player.name)
+        players_by_name[player.name] = player
+        normalized_map.setdefault(normalize_name(player.name), player)
+    index = {
+        "normalized_map": normalized_map,
+        "names": names,
+        "players_by_name": players_by_name,
+    }
+    _MANAGER_PLAYER_INDEX_CACHE[cache_key] = index
+    return index
 
 
-def _resolve_manager_player(manager: Manager, player_name: str, db_row=None):
+def _resolve_manager_player(manager: Manager, player_name: str, db_row=None, stamp: int | None = None):
     candidate_names = []
     if db_row is not None:
         candidate_names.extend(
@@ -999,27 +1030,27 @@ def _resolve_manager_player(manager: Manager, player_name: str, db_row=None):
         )
     candidate_names.append(player_name)
     normalized_targets = {normalize_name(name) for name in candidate_names if name}
-    players = list(manager.player_database)
-    for player in players:
-        if normalize_name(player.name) in normalized_targets:
+    index = _manager_player_index(manager, stamp)
+    for normalized_target in normalized_targets:
+        player = index["normalized_map"].get(normalized_target)
+        if player is not None:
             return player
-    player_names = [player.name for player in players]
     best_name = None
     best_score = 0.0
     for candidate in candidate_names:
         if not candidate:
             continue
-        match_name, score = fuzzy_best_match(candidate, player_names)
+        match_name, score = fuzzy_best_match(candidate, index["names"])
         if match_name and score > best_score:
             best_name = match_name
             best_score = score
     if best_name and best_score >= 0.82:
-        return next(player for player in players if player.name == best_name)
+        return index["players_by_name"][best_name]
     return None
 
 
-def _profile_from_manager_player(manager: Manager, player) -> dict:
-    games = list(manager.game_database.get_games_per_player(player.id))
+def _profile_from_manager_player(manager: Manager, player, games: list | None = None) -> dict:
+    games = games if games is not None else list(manager.game_database.get_games_per_player(player.id))
     wins = int(player.get_number_of_wins(games))
     losses = int(player.get_number_of_losses(games))
     draws = int(player.get_number_of_draws(games))
@@ -1033,9 +1064,9 @@ def _profile_from_manager_player(manager: Manager, player) -> dict:
     }
 
 
-def _history_from_manager_player(manager: Manager, player) -> list[dict]:
+def _history_from_manager_player(manager: Manager, player, games: list | None = None) -> list[dict]:
     history = []
-    games = list(manager.game_database.get_games_per_player(player.id))
+    games = games if games is not None else list(manager.game_database.get_games_per_player(player.id))
     tournaments = manager.tournament_database
     players = manager.player_database
     for game in games:
@@ -1056,6 +1087,20 @@ def _history_from_manager_player(manager: Manager, player) -> list[dict]:
     for row in history:
         row.pop("sort_key", None)
     return history
+
+
+def _manager_player_view_data(manager: Manager, player, stamp: int | None) -> dict:
+    cache_key = (stamp, player.id)
+    cached = _PLAYER_VIEW_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    games = list(manager.game_database.get_games_per_player(player.id))
+    data = {
+        "profile": _profile_from_manager_player(manager, player, games=games),
+        "history": _history_from_manager_player(manager, player, games=games),
+    }
+    _PLAYER_VIEW_CACHE[cache_key] = data
+    return data
 
 
 def _resolve_manager_tournament(manager: Manager, tournament_name: str, event_date: str):
@@ -1204,6 +1249,27 @@ def tournament_insights(tournament) -> dict | None:
 
 
 def _resolve_player_row(db, player_name: str):
+    target = normalize_name(player_name)
+    exact = db.execute(
+        """
+        SELECT
+          id,
+          name,
+          canonical_rating_name,
+          historical_rating,
+          historical_wins,
+          historical_losses,
+          historical_draws
+        FROM player
+        WHERE normalized_name = ?
+           OR COALESCE(canonical_rating_name, '') = ? COLLATE NOCASE
+        ORDER BY CASE WHEN normalized_name = ? THEN 0 ELSE 1 END, id ASC
+        LIMIT 1
+        """,
+        (target, player_name, target),
+    ).fetchone()
+    if exact is not None:
+        return exact
     rows = db.execute(
         """
         SELECT
@@ -1219,7 +1285,6 @@ def _resolve_player_row(db, player_name: str):
     ).fetchall()
     if not rows:
         return None
-    target = normalize_name(player_name)
     for row in rows:
         if normalize_name(row["canonical_rating_name"] or row["name"]) == target:
             return row
@@ -1235,11 +1300,11 @@ def _resolve_player_row(db, player_name: str):
 def get_player_profile(player_name: str):
     db = get_db()
     row = _resolve_player_row(db, player_name)
-    manager, _ = _preferred_manager()
+    manager, stamp = _preferred_manager()
     if manager is not None:
-        player = _resolve_manager_player(manager, player_name, db_row=row)
+        player = _resolve_manager_player(manager, player_name, db_row=row, stamp=stamp)
         if player is not None:
-            return _profile_from_manager_player(manager, player)
+            return _manager_player_view_data(manager, player, stamp)["profile"]
     if row is None:
         return None
     wins = int(row["historical_wins"] or 0)
@@ -1258,11 +1323,11 @@ def get_player_profile(player_name: str):
 def get_player_history(player_name: str):
     db = get_db()
     row = _resolve_player_row(db, player_name)
-    manager, _ = _preferred_manager()
+    manager, stamp = _preferred_manager()
     if manager is not None:
-        player = _resolve_manager_player(manager, player_name, db_row=row)
+        player = _resolve_manager_player(manager, player_name, db_row=row, stamp=stamp)
         if player is not None:
-            return _history_from_manager_player(manager, player)
+            return _manager_player_view_data(manager, player, stamp)["history"]
     if row is None:
         return []
     history = db.execute(

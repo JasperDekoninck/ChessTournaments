@@ -8,10 +8,12 @@ from typing import Any
 from flask import current_app, url_for
 
 
-MEMBERSHIP_NOTE = (
-    "ETH Chess membership is valid for one academic year and costs CHF 5, "
-    "payable at the start of the tournament if you are not a member yet."
-)
+MEMBERSHIP_NOTE = """
+If you are not yet an ETH Chess member for the current academic year, you can become one at the start of the tournament for CHF 5.
+We accept cash, TWINT, and bank transfers. Your membership is valid for the entire academic year.
+"""
+
+PUNCTUALITY_NOTE = "Please arrive on time so we can begin the tournament and publish pairings without delay. If you can't make it, please let us know so we can give your spot to the next person in the waiting list."
 
 
 def _mail_enabled() -> bool:
@@ -29,10 +31,6 @@ def _sender_header() -> str:
     return formataddr((from_name, from_email))
 
 
-def _base_url() -> str:
-    return (current_app.config.get("PUBLIC_BASE_URL") or "").rstrip("/")
-
-
 def _tournament_lines(tournament) -> list[str]:
     lines = [
         f"Tournament: {tournament['name']}",
@@ -42,14 +40,12 @@ def _tournament_lines(tournament) -> list[str]:
         lines.append(f"Start time: {tournament['event_time']}")
     if tournament["venue"]:
         lines.append(f"Venue: {tournament['venue']}")
-    public_url = f"{_base_url()}{url_for('web.public_tournament', slug=tournament['slug'])}" if _base_url() else ""
-    if public_url:
-        lines.append(f"Website: {public_url}")
     return lines
 
 
 def _deliver_message(message: EmailMessage) -> tuple[bool, str | None]:
     if not _mail_enabled():
+        current_app.logger.warning("Mail delivery skipped because SMTP is not fully configured.")
         return False, "Mail delivery is not configured."
 
     if current_app.config.get("MAIL_SUPPRESS_SEND"):
@@ -77,15 +73,23 @@ def _deliver_message(message: EmailMessage) -> tuple[bool, str | None]:
             if username:
                 server.login(username, password or "")
             server.send_message(message)
-    except OSError as exc:
+    except Exception as exc:
+        current_app.logger.exception(
+            "Failed to send email to %s via %s:%s",
+            message.get("To"),
+            host,
+            port,
+        )
         return False, str(exc)
     return True, None
 
 
 def send_email(recipient: str, subject: str, body: str) -> tuple[bool, str | None]:
     if not recipient:
+        current_app.logger.warning("Mail delivery skipped because no recipient email was provided.")
         return False, "Missing recipient email."
     if not _mail_enabled():
+        current_app.logger.warning("Mail delivery skipped because SMTP is not fully configured.")
         return False, "Mail delivery is not configured."
 
     message = EmailMessage()
@@ -114,9 +118,10 @@ def registration_email_body(tournament, player_name: str, waitlist_position: int
         *_tournament_lines(tournament),
         "",
         MEMBERSHIP_NOTE,
-        "Please be on time so pairings can start as scheduled.",
+        PUNCTUALITY_NOTE,
         "",
-        "This message was sent automatically by the ETH Chess tournament desk.",
+        "Kind Regards,",
+        "Schwarzer König",
     ]
     return "\n".join(lines)
 
@@ -125,14 +130,15 @@ def waitlist_confirmation_email_body(tournament, player_name: str) -> str:
     lines = [
         f"Hello {player_name},",
         "",
-        f"You now have a confirmed spot in {tournament['name']}.",
+        f"Good news! A spot has opened up and you are now confirmed for {tournament['name']}.",
         "",
         *_tournament_lines(tournament),
         "",
         MEMBERSHIP_NOTE,
-        "Please be on time so pairings can start as scheduled.",
+        PUNCTUALITY_NOTE,
         "",
-        "This message was sent automatically by the ETH Chess tournament desk.",
+        "Kind Regards,",
+        "Schwarzer König",
     ]
     return "\n".join(lines)
 
@@ -140,7 +146,12 @@ def waitlist_confirmation_email_body(tournament, player_name: str) -> str:
 def send_registration_email(tournament, entry: dict[str, Any], waitlist_position: int | None) -> tuple[bool, str | None]:
     recipient = entry.get("email") or entry.get("imported_email")
     body = registration_email_body(tournament, entry["name"], waitlist_position)
-    return send_email(recipient, f"Registration for {tournament['name']}", body)
+    subject = (
+        f"Waiting List for {tournament['name']}"
+        if waitlist_position is not None
+        else f"Registration Confirmed for {tournament['name']}"
+    )
+    return send_email(recipient, subject, body)
 
 
 def send_waitlist_confirmation_email(tournament, entry: dict[str, Any]) -> tuple[bool, str | None]:
