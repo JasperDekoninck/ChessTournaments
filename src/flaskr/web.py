@@ -1065,6 +1065,52 @@ def admin_activate_tournament(slug: str):
     return redirect(_admin_tournament_url(slug, open_round))
 
 
+@bp.post("/admin/t/<slug>/reset-registrations")
+@login_required
+def reset_tournament_registrations(slug: str):
+    db = get_db()
+    tournament = _tournament_or_404(slug)
+    if not _ensure_editable(tournament):
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    was_completed = tournament["status"] == "completed"
+    db.execute("DELETE FROM pairing WHERE tournament_id = ?", (tournament["id"],))
+    db.execute("DELETE FROM tournament_entry WHERE tournament_id = ?", (tournament["id"],))
+    db.execute(
+        """
+        UPDATE tournament
+        SET status = 'draft',
+            public_insights_json = NULL,
+            is_public = 0,
+            is_active_public = 0
+        WHERE id = ?
+        """,
+        (tournament["id"],),
+    )
+    db.commit()
+    if was_completed:
+        rebuild_current_manager(db)
+    else:
+        sync_member_statuses(db)
+    flash_success("Registrations, pairings, and results were reset.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/delete")
+@login_required
+def delete_tournament(slug: str):
+    db = get_db()
+    tournament = _tournament_or_404(slug)
+    was_completed = tournament["status"] == "completed" and not tournament["is_historical"]
+    db.execute("DELETE FROM tournament WHERE id = ?", (tournament["id"],))
+    db.commit()
+    if was_completed:
+        rebuild_current_manager(db)
+    else:
+        sync_member_statuses(db)
+    flash_success(f"Deleted {tournament['name']}.")
+    return redirect(url_for("web.admin", tab="tournaments"))
+
+
 @bp.post("/admin/t/<slug>/entries/<int:entry_id>/toggle")
 @login_required
 def toggle_entry(slug: str, entry_id: int):

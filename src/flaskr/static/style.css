@@ -277,6 +277,33 @@ h2 {
   display: none;
 }
 
+.admin-danger-zone {
+  border-bottom: 0;
+}
+
+.admin-danger-zone details {
+  color: var(--muted);
+}
+
+.admin-danger-zone summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.danger-actions {
+  margin-top: 0.8rem;
+}
+
+button.danger-subtle {
+  border-color: var(--line-strong);
+  color: var(--danger);
+}
+
+button.danger-subtle:hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .details-form {
   margin-top: 0.9rem;
   min-width: min(24rem, 80vw);

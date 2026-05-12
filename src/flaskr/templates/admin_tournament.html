@@ -382,6 +382,32 @@
   {% endif %}
 </section>
 
+<section class="section admin-danger-zone">
+  <details>
+    <summary>Advanced actions</summary>
+    <div class="inline-actions danger-actions">
+      {% if not tournament.is_historical %}
+        <form
+          method="post"
+          action="{{ url_for('web.reset_tournament_registrations', slug=tournament.slug) }}"
+          data-confirm="Reset all registrations, waitlist entries, pairings, and results for this tournament? Registration settings will be kept."
+        >
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="secondary tiny danger-subtle">Reset registrations</button>
+        </form>
+      {% endif %}
+      <form
+        method="post"
+        action="{{ url_for('web.delete_tournament', slug=tournament.slug) }}"
+        data-confirm="Delete this tournament permanently? This cannot be undone."
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="secondary tiny danger-subtle">Delete tournament</button>
+      </form>
+    </div>
+  </details>
+</section>
+
 {% if not tournament.is_historical %}
   <div class="modal-backdrop" hidden data-modal="registration-settings">
     <div class="modal-card modal-wide">

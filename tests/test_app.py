@@ -502,6 +502,118 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(entry_count, 45)
         self.assertEqual(len(round_one_pairings), 23)
 
+    def test_reset_tournament_registrations_clears_entries_pairings_and_keeps_settings(self):
+        slug = self._create_tournament(name="Reset Registrations Tournament")
+        self._set_all_entries_active(slug)
+        self._login()
+        with self.app.app_context():
+            db = get_db()
+            tournament = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()
+            db.execute(
+                """
+                UPDATE tournament
+                SET registration_enabled = 1,
+                    registration_opens_at = '2026-04-15T18:00',
+                    registration_form_json = ?,
+                    event_time = '19:00',
+                    venue = 'CAB H52',
+                    max_registrations = 32,
+                    status = 'running',
+                    is_public = 1,
+                    is_active_public = 1,
+                    public_insights_json = '{}'
+                WHERE id = ?
+                """,
+                (
+                    json.dumps([{"type": "text", "label": "Gender", "options": []}]),
+                    tournament["id"],
+                ),
+            )
+            db.commit()
+
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(f"/admin/t/{slug}/reset-registrations", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Registrations, pairings, and results were reset.", response.data)
+
+        with self.app.app_context():
+            db = get_db()
+            tournament = db.execute(
+                """
+                SELECT id, status, registration_enabled, registration_opens_at, registration_form_json,
+                       event_time, venue, max_registrations, is_public, is_active_public, public_insights_json
+                FROM tournament
+                WHERE slug = ?
+                """,
+                (slug,),
+            ).fetchone()
+            self.assertIsNotNone(tournament)
+            entry_count = db.execute(
+                "SELECT COUNT(*) AS count FROM tournament_entry WHERE tournament_id = ?",
+                (tournament["id"],),
+            ).fetchone()["count"]
+            pairing_count = db.execute(
+                "SELECT COUNT(*) AS count FROM pairing WHERE tournament_id = ?",
+                (tournament["id"],),
+            ).fetchone()["count"]
+            availability_count = db.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM entry_round_status ers
+                JOIN tournament_entry e ON e.id = ers.entry_id
+                WHERE e.tournament_id = ?
+                """,
+                (tournament["id"],),
+            ).fetchone()["count"]
+
+        self.assertEqual(entry_count, 0)
+        self.assertEqual(pairing_count, 0)
+        self.assertEqual(availability_count, 0)
+        self.assertEqual(tournament["status"], "draft")
+        self.assertEqual(tournament["registration_enabled"], 1)
+        self.assertEqual(tournament["registration_opens_at"], "2026-04-15T18:00")
+        self.assertEqual(json.loads(tournament["registration_form_json"])[0]["label"], "Gender")
+        self.assertEqual(tournament["event_time"], "19:00")
+        self.assertEqual(tournament["venue"], "CAB H52")
+        self.assertEqual(tournament["max_registrations"], 32)
+        self.assertEqual(tournament["is_public"], 0)
+        self.assertEqual(tournament["is_active_public"], 0)
+        self.assertIsNone(tournament["public_insights_json"])
+
+    def test_delete_tournament_removes_tournament_owned_rows(self):
+        slug = self._create_tournament(name="Delete Tournament")
+        self._set_all_entries_active(slug)
+        self._login()
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            db = get_db()
+            tournament_id = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()["id"]
+
+        response = self.client.post(f"/admin/t/{slug}/delete", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Deleted Delete Tournament.", response.data)
+
+        with self.app.app_context():
+            db = get_db()
+            tournament_count = db.execute(
+                "SELECT COUNT(*) AS count FROM tournament WHERE id = ?",
+                (tournament_id,),
+            ).fetchone()["count"]
+            entry_count = db.execute(
+                "SELECT COUNT(*) AS count FROM tournament_entry WHERE tournament_id = ?",
+                (tournament_id,),
+            ).fetchone()["count"]
+            pairing_count = db.execute(
+                "SELECT COUNT(*) AS count FROM pairing WHERE tournament_id = ?",
+                (tournament_id,),
+            ).fetchone()["count"]
+
+        self.assertEqual(tournament_count, 0)
+        self.assertEqual(entry_count, 0)
+        self.assertEqual(pairing_count, 0)
+
     def test_toggling_entry_active_exposes_unfinished_round_availability(self):
         slug = self._create_tournament(name="Availability Toggle Tournament")
         self._login()
