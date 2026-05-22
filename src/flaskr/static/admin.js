@@ -220,6 +220,9 @@ const applyEntryUpdates = (roundNo, entryUpdates) => {
     if (scoreCell) {
       scoreCell.textContent = formatStandingValue(entry.score);
     }
+    document.querySelectorAll(`[data-player-info-score="${entry.id}"]`).forEach((cell) => {
+      cell.textContent = formatStandingValue(entry.score);
+    });
     if (bhCell) {
       bhCell.textContent = formatStandingValue(entry.bh);
     }
@@ -363,7 +366,7 @@ const initRoundEditors = () => {
         if (!response.ok || !payload.ok) {
           throw new Error(payload.message || "Save failed.");
         }
-        setSaveStatus(form, "");
+        setSaveStatus(form, payload.warning || "");
         applyEntryUpdates(Number(form.dataset.roundNo), payload.entry_updates);
         updateGenerateForms(payload.next_round);
       } catch (error) {

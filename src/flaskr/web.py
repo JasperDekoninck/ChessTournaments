@@ -250,6 +250,73 @@ def _secondary_prize_rankings(tournament) -> dict[str, list[dict]]:
     return {"performances": performances[:10], "games": games[:10]}
 
 
+def _registration_answers_from_request(registration_fields: list[dict]) -> tuple[list[dict], str | None]:
+    answers = []
+    for index, field in enumerate(registration_fields):
+        value = (request.form.get(f"registration_field_{index}") or "").strip()
+        if not value:
+            return [], f"{field['label']} is required."
+        if field["type"] == "dropdown" and value not in field["options"]:
+            return [], f"Choose a valid value for {field['label']}."
+        answers.append(
+            {
+                "label": field["label"],
+                "type": field["type"],
+                "value": value,
+            }
+        )
+    return answers, None
+
+
+def _parse_registration_answers(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        raw_answers = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(raw_answers, list):
+        return []
+    answers = []
+    for raw in raw_answers:
+        if not isinstance(raw, dict):
+            continue
+        label = " ".join(str(raw.get("label") or "").split())
+        answer_value = str(raw.get("value") or "").strip()
+        if not label or not answer_value:
+            continue
+        answers.append(
+            {
+                "label": label,
+                "type": (raw.get("type") or "text").strip().lower(),
+                "value": answer_value,
+            }
+        )
+    return answers
+
+
+def _player_information_rows(entries, standings_by_entry: dict, registration_fields: list[dict]) -> list[dict]:
+    rows = []
+    for entry in entries:
+        answers = _parse_registration_answers(entry["registration_answers_json"])
+        answers_by_label = {answer["label"].casefold(): answer["value"] for answer in answers}
+        field_values = []
+        for index, field in enumerate(registration_fields):
+            value = answers_by_label.get(field["label"].casefold())
+            if value is None and index < len(answers):
+                value = answers[index]["value"]
+            field_values.append(value or "")
+        standing = standings_by_entry.get(entry["id"])
+        rows.append(
+            {
+                "entry": entry,
+                "score": float(standing["score"]) if standing else 0.0,
+                "field_values": field_values,
+            }
+        )
+    return rows
+
+
 def _entry_state_payload(db, entry_id: int) -> dict | None:
     entry = db.execute(
         """
@@ -288,6 +355,23 @@ def _tournament_round_meta(db, tournament) -> tuple[int | None, int | None, int 
 
 def _round_is_locked(db, tournament, round_no: int) -> bool:
     return pairings_complete(db, tournament["id"], round_no)
+
+
+def _repeat_pairing_warning(db, tournament_id: int, round_no: int, boards: list[dict]) -> str | None:
+    previous_pairs = {
+        frozenset((pairing["white_entry_id"], pairing["black_entry_id"]))
+        for pairing in fetch_pairings(db, tournament_id)
+        if pairing["round_no"] != round_no
+        and pairing["white_entry_id"] is not None
+        and pairing["black_entry_id"] is not None
+    }
+    for board in boards:
+        if board.get("black_entry_id") is None:
+            continue
+        pair_key = frozenset((board["white_entry_id"], board["black_entry_id"]))
+        if pair_key in previous_pairs:
+            return "This manual override repeats an earlier pairing."
+    return None
 
 
 def _entry_row_payload(db, tournament, entry_id: int) -> dict | None:
@@ -549,22 +633,10 @@ def submit_registration(slug: str):
         return redirect(url_for("web.register"))
 
     registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
-    registration_answers = []
-    for index, field in enumerate(registration_fields):
-        value = (request.form.get(f"registration_field_{index}") or "").strip()
-        if not value:
-            flash_error(f"{field['label']} is required.")
-            return redirect(url_for("web.register"))
-        if field["type"] == "dropdown" and value not in field["options"]:
-            flash_error(f"Choose a valid value for {field['label']}.")
-            return redirect(url_for("web.register"))
-        registration_answers.append(
-            {
-                "label": field["label"],
-                "type": field["type"],
-                "value": value,
-            }
-        )
+    registration_answers, registration_error = _registration_answers_from_request(registration_fields)
+    if registration_error:
+        flash_error(registration_error)
+        return redirect(url_for("web.register"))
 
     row = {
         "name": name,
@@ -856,6 +928,14 @@ def add_entry(slug: str):
         "submitted_at": None,
         "declared_rating": parse_int(request.form.get("declared_rating"), default=None),
     }
+    registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
+    registration_answers, registration_error = _registration_answers_from_request(registration_fields)
+    if registration_error:
+        flash_error(registration_error)
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    row["registration_answers_json"] = (
+        json.dumps(registration_answers, ensure_ascii=True) if registration_answers else None
+    )
     attach_entries_to_tournament(db, tournament["id"], [row], build_matcher())
     flash_success(f"Added {name}.")
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
@@ -937,6 +1017,7 @@ def admin_tournament_detail(slug: str):
     availability = fetch_availability(db, tournament["id"])
     standings = compute_standings(db, tournament["id"])
     standings_by_entry = {row["entry_id"]: row for row in standings}
+    registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
     round_panels = _round_panels(tournament, entries, availability)
     open_round = parse_int(request.args.get("open_round"), default=None)
     latest_round, next_round, editable_round = _tournament_round_meta(db, tournament)
@@ -948,7 +1029,8 @@ def admin_tournament_detail(slug: str):
     return render_template(
         "admin_tournament.html",
         tournament=tournament,
-        registration_fields=parse_registration_form_fields(tournament["registration_form_json"]),
+        registration_fields=registration_fields,
+        player_information_rows=_player_information_rows(entries, standings_by_entry, registration_fields),
         entries=entries,
         registration_summary=registration_counts(db, tournament["id"]),
         availability=availability,
@@ -1002,6 +1084,52 @@ def admin_activate_tournament(slug: str):
         set_active_tournament(get_db(), tournament["id"])
         flash_success(f"{tournament['name']} is now the public tournament.")
     return redirect(_admin_tournament_url(slug, open_round))
+
+
+@bp.post("/admin/t/<slug>/reset-registrations")
+@login_required
+def reset_tournament_registrations(slug: str):
+    db = get_db()
+    tournament = _tournament_or_404(slug)
+    if not _ensure_editable(tournament):
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    was_completed = tournament["status"] == "completed"
+    db.execute("DELETE FROM pairing WHERE tournament_id = ?", (tournament["id"],))
+    db.execute("DELETE FROM tournament_entry WHERE tournament_id = ?", (tournament["id"],))
+    db.execute(
+        """
+        UPDATE tournament
+        SET status = 'draft',
+            public_insights_json = NULL,
+            is_public = 0,
+            is_active_public = 0
+        WHERE id = ?
+        """,
+        (tournament["id"],),
+    )
+    db.commit()
+    if was_completed:
+        rebuild_current_manager(db)
+    else:
+        sync_member_statuses(db)
+    flash_success("Registrations, pairings, and results were reset.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/delete")
+@login_required
+def delete_tournament(slug: str):
+    db = get_db()
+    tournament = _tournament_or_404(slug)
+    was_completed = tournament["status"] == "completed" and not tournament["is_historical"]
+    db.execute("DELETE FROM tournament WHERE id = ?", (tournament["id"],))
+    db.commit()
+    if was_completed:
+        rebuild_current_manager(db)
+    else:
+        sync_member_statuses(db)
+    flash_success(f"Deleted {tournament['name']}.")
+    return redirect(url_for("web.admin", tab="tournaments"))
 
 
 @bp.post("/admin/t/<slug>/entries/<int:entry_id>/toggle")
@@ -1183,7 +1311,7 @@ def generate_round(slug: str, round_no: int):
         return redirect(_admin_tournament_url(slug, round_no))
     boards = generate_swiss_pairings(db, tournament["id"], round_no)
     if not boards:
-        flash_warning("Not enough available players to generate pairings.")
+        flash_warning("Not enough available players, or no legal FIDE Dutch pairing was found.")
     else:
         replace_round_pairings(db, tournament["id"], round_no, boards)
         db.execute(
@@ -1226,6 +1354,7 @@ def save_round(slug: str, round_no: int):
             return jsonify({"ok": False, "message": str(exc)}), 400
         flash_error(str(exc))
         return redirect(_admin_tournament_url(slug, round_no))
+    repeat_warning = _repeat_pairing_warning(db, tournament["id"], round_no, boards)
     replace_round_pairings(db, tournament["id"], round_no, boards, manual_override=True)
     db.execute(
         "UPDATE tournament SET status = CASE WHEN status = 'draft' THEN 'running' ELSE status END WHERE id = ?",
@@ -1235,8 +1364,12 @@ def save_round(slug: str, round_no: int):
     sync_member_statuses(db)
     if _wants_json():
         payload = {"ok": True, "message": f"Round {round_no} saved."}
+        if repeat_warning:
+            payload["warning"] = repeat_warning
         payload.update(_admin_round_updates_payload(db, tournament, round_no))
         return jsonify(payload)
+    if repeat_warning:
+        flash_warning(repeat_warning)
     flash_success(f"Saved round {round_no}.")
     return redirect(_admin_tournament_url(slug, round_no))
 
@@ -1249,6 +1382,10 @@ def complete_tournament(slug: str):
     tournament = _tournament_or_404(slug)
     if not _ensure_editable(tournament):
         return redirect(_admin_tournament_url(slug, open_round))
+    latest_round = latest_paired_round(db, tournament["id"])
+    if latest_round is not None and not pairings_complete(db, tournament["id"], latest_round):
+        flash_warning(f"Enter all results for round {latest_round} before finishing the tournament.")
+        return redirect(_admin_tournament_url(slug, latest_round))
     db.execute("UPDATE tournament SET status = 'completed' WHERE id = ?", (tournament["id"],))
     db.commit()
     persist_final_standings(db, tournament["id"])
