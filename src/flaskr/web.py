@@ -230,6 +230,26 @@ def _tournament_standings_csv(tournament) -> str:
     return output.getvalue()
 
 
+def _secondary_prize_rankings(tournament) -> dict[str, list[dict]]:
+    insights = tournament_insights(tournament)
+    if not isinstance(insights, dict):
+        return {"performances": [], "games": []}
+
+    performances = insights.get("surprising_performance_ranking")
+    if not isinstance(performances, list):
+        performances = []
+    if not performances and isinstance(insights.get("above_level"), dict):
+        performances = [insights["above_level"]]
+
+    games = insights.get("surprising_game_ranking")
+    if not isinstance(games, list):
+        games = []
+    if not games and isinstance(insights.get("biggest_upset"), dict):
+        games = [insights["biggest_upset"]]
+
+    return {"performances": performances[:10], "games": games[:10]}
+
+
 def _entry_state_payload(db, entry_id: int) -> dict | None:
     entry = db.execute(
         """
@@ -934,6 +954,7 @@ def admin_tournament_detail(slug: str):
         availability=availability,
         standings=standings,
         standings_by_entry=standings_by_entry,
+        secondary_prize_rankings=_secondary_prize_rankings(tournament),
         round_cells=_entry_round_cells(entries, availability, pairings, tournament["rounds_planned"]),
         round_panels=round_panels,
         next_round=next_round,

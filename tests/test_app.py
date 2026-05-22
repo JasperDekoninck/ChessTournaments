@@ -11,7 +11,7 @@ from pathlib import Path
 from flaskr import create_app
 from flaskr.auth import hash_password
 from flaskr.core import _pair_group, fetch_pairings
-from flaskr.db import get_db, init_db
+from flaskr.db import _add_column_if_missing, _table_columns, get_db, init_db
 from flaskr.rating_integration import get_player_history, get_player_profile, import_rating_history, sync_member_statuses
 from rating import Manager, PlayerDatabase
 
@@ -186,6 +186,22 @@ class TournamentAppTestCase(unittest.TestCase):
             row = db.execute("SELECT value FROM app_config WHERE key = 'admin_password_hash'").fetchone()
         self.assertIsNotNone(row)
         self.assertTrue(row["value"].startswith("scrypt:"))
+
+    def test_migration_helpers_reject_unsafe_sql_identifiers(self):
+        with self.app.app_context():
+            db = get_db()
+            with self.assertRaises(ValueError):
+                _table_columns(db, 'tournament; DROP TABLE tournament; --')
+            with self.assertRaises(ValueError):
+                _add_column_if_missing(db, "tournament", 'note"; DROP TABLE tournament; --', "TEXT")
+            with self.assertRaises(ValueError):
+                _add_column_if_missing(db, "tournament", "safe_note", "TEXT; DROP TABLE tournament; --")
+
+    def test_migration_helpers_allow_safe_identifier_updates(self):
+        with self.app.app_context():
+            db = get_db()
+            _add_column_if_missing(db, "tournament", "security_audit_note", "TEXT")
+            self.assertIn("security_audit_note", _table_columns(db, "tournament"))
 
     def test_legacy_admin_password_file_is_migrated_into_database(self):
         legacy_root = Path(self.tempdir.name) / "legacy-instance"
@@ -582,6 +598,78 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertIn(b"Played Above Level", response.data)
         self.assertIn(b"Most Unlikely Win", response.data)
         self.assertIn(b"1st", response.data)
+
+    def test_admin_only_shows_top_10_secondary_prize_rankings(self):
+        slug = self._create_tournament(name="Secondary Prize Tournament")
+        insights = {
+            "above_level": {
+                "name": "Performance Player 01",
+                "start_rating": 1500,
+                "performance_rating": 2100,
+                "probability": 0.01,
+                "normalized_boost": 2.3,
+            },
+            "biggest_upset": {
+                "winner": "Game Winner 01",
+                "winner_rating": 1450,
+                "loser": "Game Loser 01",
+                "loser_rating": 2200,
+                "result": "1-0",
+                "win_probability": 0.02,
+            },
+            "surprising_performance_ranking": [
+                {
+                    "name": f"Performance Player {index:02d}",
+                    "start_rating": 1500 + index,
+                    "performance_rating": 2100 - index,
+                    "probability": index / 100,
+                    "normalized_boost": 3.0 - index / 10,
+                }
+                for index in range(1, 13)
+            ],
+            "surprising_game_ranking": [
+                {
+                    "winner": f"Game Winner {index:02d}",
+                    "winner_rating": 1450 + index,
+                    "loser": f"Game Loser {index:02d}",
+                    "loser_rating": 2200 - index,
+                    "result": "1-0" if index % 2 else "0-1",
+                    "win_probability": index / 100,
+                }
+                for index in range(1, 13)
+            ],
+        }
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                """
+                UPDATE tournament
+                SET status = 'completed', public_insights_json = ?
+                WHERE slug = ?
+                """,
+                (json.dumps(insights), slug),
+            )
+            db.commit()
+
+        response = self.client.get(f"/admin/t/{slug}")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Secondary Prizes", response.data)
+        self.assertIn(b"Most Surprising Performance", response.data)
+        self.assertIn(b"Most Surprising Game", response.data)
+        self.assertIn(b"Performance Player 10", response.data)
+        self.assertNotIn(b"Performance Player 11", response.data)
+        self.assertIn(b"Game Winner 10", response.data)
+        self.assertNotIn(b"Game Winner 11", response.data)
+
+        self._publish_tournament(slug)
+        response = self.client.get(f"/t/{slug}?view=standings")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Final Highlights", response.data)
+        self.assertIn(b"Performance Player 01", response.data)
+        self.assertIn(b"Game Winner 01", response.data)
+        self.assertNotIn(b"Secondary Prizes", response.data)
+        self.assertNotIn(b"Performance Player 02", response.data)
+        self.assertNotIn(b"Game Winner 02", response.data)
 
     def test_add_player_manually(self):
         slug = self._create_tournament(name="Manual Entry Tournament")

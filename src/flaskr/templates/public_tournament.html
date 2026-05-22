@@ -51,7 +51,7 @@
               Performance {{ tournament_insights.above_level.performance_rating }}
               vs {{ tournament_insights.above_level.start_rating }}
             </span>
-            <span>{{ "%.1f"|format(tournament_insights.above_level.probability * 100) }}% tail probability</span>
+            <span>{{ "%.1f"|format(tournament_insights.above_level.probability * 100) }}% tail prob</span>
           </article>
         {% endif %}
         {% if tournament_insights.biggest_upset %}
@@ -59,7 +59,7 @@
             <small>Most Unlikely Win</small>
             <strong>{{ tournament_insights.biggest_upset.winner }}</strong>
             <span>beat {{ tournament_insights.biggest_upset.loser }} ({{ tournament_insights.biggest_upset.result }})</span>
-            <span>{{ "%.1f"|format(tournament_insights.biggest_upset.win_probability * 100) }}% win probability</span>
+            <span>{{ "%.1f"|format(tournament_insights.biggest_upset.win_probability * 100) }}% win prob</span>
           </article>
         {% endif %}
       </div>

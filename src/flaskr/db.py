@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 
 import click
 from flask import current_app, g
+
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_FORBIDDEN_DEFINITION_TOKENS = (";", "--", "/*", "*/", "\x00")
 
 
 def get_db() -> sqlite3.Connection:
@@ -44,15 +48,34 @@ def ensure_db():
     db.commit()
 
 
+def _quote_identifier(value: str, kind: str) -> str:
+    if not _IDENTIFIER_RE.fullmatch(value):
+        raise ValueError(f"Unsafe {kind}: {value!r}")
+    return f'"{value}"'
+
+
+def _validate_column_definition(definition: str) -> str:
+    cleaned = definition.strip()
+    if not cleaned:
+        raise ValueError("Column definition must not be empty.")
+    if any(token in cleaned for token in _FORBIDDEN_DEFINITION_TOKENS):
+        raise ValueError(f"Unsafe column definition: {definition!r}")
+    return cleaned
+
+
 def _table_columns(db, table_name: str) -> set[str]:
-    return {row["name"] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    table_ref = _quote_identifier(table_name, "table name")
+    return {row["name"] for row in db.execute(f"PRAGMA table_info({table_ref})").fetchall()}
 
 
 def _add_column_if_missing(db, table_name: str, column_name: str, definition: str):
     if column_name in _table_columns(db, table_name):
         return
+    table_ref = _quote_identifier(table_name, "table name")
+    column_ref = _quote_identifier(column_name, "column name")
+    column_definition = _validate_column_definition(definition)
     try:
-        db.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+        db.execute(f"ALTER TABLE {table_ref} ADD COLUMN {column_ref} {column_definition}")
     except sqlite3.OperationalError as exc:
         if "duplicate column name" not in str(exc).lower():
             raise

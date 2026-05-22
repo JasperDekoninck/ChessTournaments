@@ -1205,6 +1205,8 @@ def _compute_tournament_insights_from_manager(manager: Manager, manager_tourname
     return {
         "above_level": above_level,
         "biggest_upset": biggest_upset,
+        "surprising_performance_ranking": performance_rows,
+        "surprising_game_ranking": upset_rows,
     }
 
 
@@ -1218,23 +1220,31 @@ def _parse_stored_insights(value: str | None) -> dict | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _insights_include_rankings(insights: dict) -> bool:
+    return (
+        isinstance(insights.get("surprising_performance_ranking"), list)
+        and isinstance(insights.get("surprising_game_ranking"), list)
+    )
+
+
 def tournament_insights(tournament) -> dict | None:
     if tournament is None or tournament["status"] != "completed":
         return None
     stored = _parse_stored_insights(tournament["public_insights_json"] if "public_insights_json" in tournament.keys() else None)
-    if stored is not None:
+    if stored is not None and _insights_include_rankings(stored):
         return stored
     manager, stamp = _preferred_manager()
     if manager is None:
-        return None
+        return stored
     cache_key = (stamp, tournament["event_date"], normalize_name(tournament["name"]))
     if cache_key in _TOURNAMENT_INSIGHTS_CACHE:
-        return _TOURNAMENT_INSIGHTS_CACHE[cache_key]
+        cached = _TOURNAMENT_INSIGHTS_CACHE[cache_key]
+        return cached if cached is not None else stored
 
     manager_tournament = _resolve_manager_tournament(manager, tournament["name"], tournament["event_date"])
     if manager_tournament is None:
-        _TOURNAMENT_INSIGHTS_CACHE[cache_key] = None
-        return None
+        _TOURNAMENT_INSIGHTS_CACHE[cache_key] = stored
+        return stored
 
     insight = _compute_tournament_insights_from_manager(manager, manager_tournament)
     _TOURNAMENT_INSIGHTS_CACHE[cache_key] = insight
@@ -1245,7 +1255,7 @@ def tournament_insights(tournament) -> dict | None:
             (json.dumps(insight, ensure_ascii=True), tournament["id"]),
         )
         db.commit()
-    return insight
+    return insight if insight is not None else stored
 
 
 def _resolve_player_row(db, player_name: str):

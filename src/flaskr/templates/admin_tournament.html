@@ -30,6 +30,81 @@
   </div>
 </section>
 
+{% if secondary_prize_rankings["performances"] or secondary_prize_rankings["games"] %}
+  <section class="section">
+    <div class="section-heading">
+      <div>
+        <h2>Secondary Prizes</h2>
+        <p class="lede">Admin-only top 10 ranking for the surprising performance and game prizes.</p>
+      </div>
+    </div>
+    <div class="grid two-col">
+      <div>
+        <h3>Most Surprising Performance</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Player</th>
+                <th>Start</th>
+                <th>Performance</th>
+                <th>Tail prob</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in secondary_prize_rankings["performances"] %}
+                <tr>
+                  <td>{{ loop.index }}</td>
+                  <td>{{ row.name }}</td>
+                  <td>{{ row.start_rating }}</td>
+                  <td>{{ row.performance_rating }}</td>
+                  <td>{{ "%.1f"|format(row.probability * 100) }}%</td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="5" class="muted">No performance ranking available.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <h3>Most Surprising Game</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Winner</th>
+                <th>Loser</th>
+                <th>Result</th>
+                <th>Win prob</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in secondary_prize_rankings["games"] %}
+                <tr>
+                  <td>{{ loop.index }}</td>
+                  <td>{{ row.winner }}{% if row.winner_rating is not none %} <small>({{ row.winner_rating }})</small>{% endif %}</td>
+                  <td>{{ row.loser }}{% if row.loser_rating is not none %} <small>({{ row.loser_rating }})</small>{% endif %}</td>
+                  <td>{{ row.result }}</td>
+                  <td>{{ "%.1f"|format(row.win_probability * 100) }}%</td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="5" class="muted">No decisive games available.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+{% endif %}
+
 <section class="section">
   <div class="section-heading">
     <h2>Rounds</h2>
