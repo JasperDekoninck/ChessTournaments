@@ -164,6 +164,44 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertLess(black_score_index, black_index)
         self.assertIn(b"0.0", response.data)
 
+    def test_public_live_endpoint_reflects_scores_and_new_rounds(self):
+        slug = self._create_tournament(name="Public Live Tournament")
+        self._set_all_entries_active(slug)
+        self._login()
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self._publish_tournament(slug)
+
+        with self.app.app_context():
+            db = get_db()
+            tournament = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()
+            pairings = fetch_pairings(db, tournament["id"], 1)
+
+        form = {"board_count": str(len(pairings))}
+        for pairing in pairings:
+            form[f"white_{pairing['board_no']}"] = str(pairing["white_entry_id"])
+            if pairing["black_entry_id"] is not None:
+                form[f"black_{pairing['board_no']}"] = str(pairing["black_entry_id"])
+                form[f"result_{pairing['board_no']}"] = "1-0"
+            else:
+                form[f"result_{pairing['board_no']}"] = "BYE"
+        response = self.client.post(f"/admin/t/{slug}/round/1/save", data=form, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.get(f"/t/{slug}/live?round_no=1&view=boards")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("version", payload)
+        self.assertIn("1-0", payload["html"])
+        self.assertIn("1.0", payload["html"])
+
+        response = self.client.post(f"/admin/t/{slug}/round/2/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        response = self.client.get(f"/t/{slug}/live?view=boards")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertIn("Round 2", payload["html"])
+
     def test_admin_round_cards_render_score_buttons_for_results(self):
         self._login()
         response = self.client.post(
@@ -820,6 +858,17 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertIn(b"Played Above Level", response.data)
         self.assertIn(b"Most Unlikely Win", response.data)
         self.assertIn(b"1st", response.data)
+        rating_index = response.data.index(b"<th>Rating</th>")
+        performance_index = response.data.index(b"<th>Performance</th>")
+        score_index = response.data.index(b"<th>Score</th>")
+        self.assertLess(rating_index, performance_index)
+        self.assertLess(performance_index, score_index)
+
+        response = self.client.get(f"/admin/t/{slug}/export.csv")
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.reader(io.StringIO(response.data.decode("utf-8"))))
+        self.assertEqual(rows[0][:5], ["Rank", "Name", "Rating", "Performance", "Score"])
+        self.assertTrue(any(row[3] for row in rows[1:]))
 
     def test_admin_only_shows_top_10_secondary_prize_rankings(self):
         slug = self._create_tournament(name="Secondary Prize Tournament")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 from math import ceil
@@ -160,6 +161,39 @@ def _register_context():
     }
 
 
+def _annotate_performance_ratings(db, tournament, standings: list[dict], insights: dict | None = None) -> dict | None:
+    if insights is None:
+        insights = tournament_insights(tournament)
+    performance_rows = []
+    if isinstance(insights, dict):
+        raw_performances = insights.get("surprising_performance_ranking")
+        if isinstance(raw_performances, list):
+            performance_rows.extend(row for row in raw_performances if isinstance(row, dict))
+        above_level = insights.get("above_level")
+        if isinstance(above_level, dict):
+            performance_rows.append(above_level)
+    performance_by_name = {
+        normalize_name(row["name"]): row.get("performance_rating")
+        for row in performance_rows
+        if row.get("name") and row.get("performance_rating") is not None
+    }
+    entries_by_id = {row["id"]: row for row in fetch_entries(db, tournament["id"])}
+    for row in standings:
+        entry = entries_by_id.get(row["entry_id"])
+        candidate_names = [row["name"]]
+        if entry and entry["canonical_rating_name"]:
+            candidate_names.append(entry["canonical_rating_name"])
+        row["performance_rating"] = next(
+            (
+                performance_by_name[normalize_name(name)]
+                for name in candidate_names
+                if name and normalize_name(name) in performance_by_name
+            ),
+            None,
+        )
+    return insights
+
+
 def _round_view_context(tournament, selected_round: int | None = None, final_standings: bool = False):
     db = get_db()
     round_numbers = public_rounds(db, tournament["id"])
@@ -173,6 +207,7 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
     if not final_standings and not (tournament["status"] == "completed" and selected_round == latest_round):
         standings_round = selected_round
     standings = compute_standings(db, tournament["id"], through_round=standings_round)
+    insights = _annotate_performance_ratings(db, tournament, standings)
     standings_by_entry = {row["entry_id"]: row for row in standings}
     pairing_rows = []
     for pairing in pairings:
@@ -190,9 +225,20 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
         "pairings": pairing_rows,
         "standings": standings,
         "podium": podium,
-        "tournament_insights": tournament_insights(tournament),
+        "tournament_insights": insights,
         "view_mode": _selected_public_view(selected_round),
     }
+
+
+def _public_rounds_fragment_response(tournament, selected_round: int | None):
+    context = _round_view_context(tournament, selected_round, final_standings=bool(tournament["is_historical"]))
+    html = render_template("_public_tournament_rounds.html", tournament=tournament, **context)
+    return jsonify(
+        {
+            "version": hashlib.sha256(html.encode("utf-8")).hexdigest(),
+            "html": html,
+        }
+    )
 
 
 def _selected_admin_tab() -> str:
@@ -213,6 +259,7 @@ def _admin_tournament_url(slug: str, round_no: int | None = None) -> str:
 def _tournament_standings_csv(tournament) -> str:
     db = get_db()
     standings = compute_standings(db, tournament["id"])
+    _annotate_performance_ratings(db, tournament, standings)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(
@@ -220,6 +267,7 @@ def _tournament_standings_csv(tournament) -> str:
             "Rank",
             "Name",
             "Rating",
+            "Performance",
             "Score",
             tournament["primary_tiebreak_label"],
             tournament["secondary_tiebreak_label"],
@@ -231,6 +279,7 @@ def _tournament_standings_csv(tournament) -> str:
                 row["rank"],
                 row["name"],
                 row["seed_rating"],
+                row["performance_rating"] if row["performance_rating"] is not None else "",
                 f"{float(row['score']):.1f}",
                 f"{float(row['bh']):.1f}",
                 f"{float(row['bh_c1']):.1f}",
@@ -572,6 +621,13 @@ def public_tournament_round(slug: str, round_no: int):
         active_tournament=fetch_active_tournament(get_db()),
         **context,
     )
+
+
+@bp.get("/t/<slug>/live")
+def public_tournament_live(slug: str):
+    tournament = _public_tournament_or_404(slug)
+    selected_round = parse_int(request.args.get("round_no"), default=None)
+    return _public_rounds_fragment_response(tournament, selected_round)
 
 
 @bp.route("/leaderboard")
