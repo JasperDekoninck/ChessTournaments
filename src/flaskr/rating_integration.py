@@ -46,7 +46,6 @@ from .db import get_db
 
 MEMBER_SINCE_KEY = "member_since_date"
 _MANAGER_CACHE: dict[str, tuple[int | None, Manager]] = {}
-_CSV_CACHE: dict[str, tuple[int | None, list[dict]]] = {}
 _TOURNAMENT_INSIGHTS_CACHE: dict[tuple[int | None, str, str], dict | None] = {}
 _MANAGER_PLAYER_INDEX_CACHE: dict[tuple[int | None, int], dict] = {}
 _PLAYER_VIEW_CACHE: dict[tuple[int | None, int], dict] = {}
@@ -89,7 +88,6 @@ def _ensure_rating_dir():
 
 def _clear_runtime_caches():
     _MANAGER_CACHE.clear()
-    _CSV_CACHE.clear()
     _TOURNAMENT_INSIGHTS_CACHE.clear()
     _MANAGER_PLAYER_INDEX_CACHE.clear()
     _PLAYER_VIEW_CACHE.clear()
@@ -158,20 +156,6 @@ def _preferred_manager() -> tuple[Manager | None, int | None]:
     if baseline_path.exists():
         return baseline_manager(), _manager_stamp("baseline")
     return None, None
-
-
-def _cached_csv_rows(path: Path) -> list[dict]:
-    stamp = path.stat().st_mtime_ns if path.exists() else None
-    cached = _CSV_CACHE.get(str(path))
-    if cached is not None and cached[0] == stamp:
-        return cached[1]
-    if not path.exists():
-        _CSV_CACHE[str(path)] = (None, [])
-        return []
-    with path.open("r", encoding="utf-8-sig", newline="") as file_handle:
-        rows = list(csv.DictReader(file_handle))
-    _CSV_CACHE[str(path)] = (stamp, rows)
-    return rows
 
 
 def default_member_since_date(reference: date | None = None) -> str:

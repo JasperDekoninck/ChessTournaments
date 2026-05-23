@@ -698,24 +698,71 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertTrue(payload["entry"]["round_cells"][0]["can_toggle"])
         self.assertEqual(payload["entry"]["round_cells"][0]["cell"]["label"], "in")
 
-    def test_leaderboard_page_reads_cached_export_csv(self):
+    def test_ratings_page_uses_manager_rows_without_csv_export(self):
         (self.export_dir / "anonymous_leaderboard.csv").write_text(
             "\n".join(
                 [
                     "Rank,Name,Rating,Wins,Losses,Draws",
-                    "1,Cached Leader,2100,12,3,1",
+                    "1,Stale Cached Leader,2100,12,3,1",
                 ]
             )
             + "\n",
             encoding="utf-8",
         )
 
-        response = self.client.get("/leaderboard")
+        self._login()
+        response = self.client.post(
+            "/admin/tournaments",
+            data={"name": "Ratings Page Tournament", "event_date": "2026-04-16", "rounds_planned": "1"},
+            follow_redirects=True,
+        )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Cached Leader", response.data)
-        self.assertIn(b"2100", response.data)
+        with self.app.app_context():
+            db = get_db()
+            slug = db.execute("SELECT slug FROM tournament WHERE name = 'Ratings Page Tournament'").fetchone()["slug"]
 
-    def test_complete_tournament_writes_rating_exports(self):
+        for index, name in enumerate(("Alpha Example", "Beta Example"), start=1):
+            response = self.client.post(
+                f"/admin/t/{slug}/entries",
+                data={"name": name, "declared_rating": str(1600 - index * 100)},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            db = get_db()
+            tournament = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()
+            pairing = fetch_pairings(db, tournament["id"], 1)[0]
+
+        response = self.client.post(
+            f"/admin/t/{slug}/round/1/save",
+            data={
+                "board_count": "1",
+                "white_1": str(pairing["white_entry_id"]),
+                "black_1": str(pairing["black_entry_id"]),
+                "result_1": "1-0",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(f"/admin/t/{slug}/complete", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        response = self.client.get("/ratings")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Alpha Example", response.data)
+        self.assertNotIn(b"Stale Cached Leader", response.data)
+        self.assertNotIn(b"Current club ranking", response.data)
+        self.assertNotIn(b'<p class="kicker">', response.data)
+        self.assertNotIn(b"CSV", response.data)
+        self.assertIn(b'class="compact-table"', response.data)
+
+        response = self.client.get("/leaderboard.csv")
+        self.assertEqual(response.status_code, 404)
+
+    def test_complete_tournament_writes_tournament_rating_export(self):
         slug = self._create_tournament(name="Completed Tournament")
         self._set_all_entries_active(slug)
         self._login()
@@ -740,7 +787,7 @@ class TournamentAppTestCase(unittest.TestCase):
         response = self.client.post(f"/admin/t/{slug}/complete", follow_redirects=True)
         self.assertEqual(response.status_code, 200)
 
-        self.assertTrue((self.export_dir / "anonymous_leaderboard.csv").exists())
+        self.assertFalse((self.export_dir / "anonymous_leaderboard.csv").exists())
         self.assertTrue((self.export_dir / "tournaments" / slug / "leaderboard.csv").exists())
 
     def test_complete_tournament_stores_final_snapshot_in_database(self):
