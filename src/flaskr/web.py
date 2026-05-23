@@ -194,6 +194,10 @@ def _annotate_performance_ratings(db, tournament, standings: list[dict], insight
     return insights
 
 
+def _has_performance_ratings(standings: list[dict]) -> bool:
+    return any(row.get("performance_rating") is not None for row in standings)
+
+
 def _round_view_context(tournament, selected_round: int | None = None, final_standings: bool = False):
     db = get_db()
     round_numbers = public_rounds(db, tournament["id"])
@@ -224,6 +228,7 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
         "latest_round": latest_round,
         "pairings": pairing_rows,
         "standings": standings,
+        "has_performance_ratings": _has_performance_ratings(standings),
         "podium": podium,
         "tournament_insights": insights,
         "view_mode": _selected_public_view(selected_round),
@@ -260,31 +265,20 @@ def _tournament_standings_csv(tournament) -> str:
     db = get_db()
     standings = compute_standings(db, tournament["id"])
     _annotate_performance_ratings(db, tournament, standings)
+    has_performance_ratings = _has_performance_ratings(standings)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(
-        [
-            "Rank",
-            "Name",
-            "Rating",
-            "Performance",
-            "Score",
-            tournament["primary_tiebreak_label"],
-            tournament["secondary_tiebreak_label"],
-        ]
-    )
+    header = ["Rank", "Name", "Rating"]
+    if has_performance_ratings:
+        header.append("Performance")
+    header.extend(["Score", tournament["primary_tiebreak_label"], tournament["secondary_tiebreak_label"]])
+    writer.writerow(header)
     for row in standings:
-        writer.writerow(
-            [
-                row["rank"],
-                row["name"],
-                row["seed_rating"],
-                row["performance_rating"] if row["performance_rating"] is not None else "",
-                f"{float(row['score']):.1f}",
-                f"{float(row['bh']):.1f}",
-                f"{float(row['bh_c1']):.1f}",
-            ]
-        )
+        csv_row = [row["rank"], row["name"], row["seed_rating"]]
+        if has_performance_ratings:
+            csv_row.append(row["performance_rating"] if row["performance_rating"] is not None else "")
+        csv_row.extend([f"{float(row['score']):.1f}", f"{float(row['bh']):.1f}", f"{float(row['bh_c1']):.1f}"])
+        writer.writerow(csv_row)
     return output.getvalue()
 
 
@@ -1001,7 +995,7 @@ def add_entry(slug: str):
     row["registration_answers_json"] = (
         json.dumps(registration_answers, ensure_ascii=True) if registration_answers else None
     )
-    attach_entries_to_tournament(db, tournament["id"], [row], build_matcher())
+    attach_entries_to_tournament(db, tournament["id"], [row], build_matcher(), default_active=True)
     flash_success(f"Added {name}.")
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
 

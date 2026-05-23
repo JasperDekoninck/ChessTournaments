@@ -1461,6 +1461,10 @@ def attach_entries_to_tournament(db, tournament_id: int, imported_rows: list[dic
               declared_rating = excluded.declared_rating,
               seed_rating = excluded.seed_rating,
               member_status = excluded.member_status,
+              is_active = CASE
+                WHEN excluded.is_active = 1 THEN 1
+                ELSE tournament_entry.is_active
+              END,
               registration_answers_json = COALESCE(
                 excluded.registration_answers_json,
                 tournament_entry.registration_answers_json

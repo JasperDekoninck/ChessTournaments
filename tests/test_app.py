@@ -870,6 +870,31 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(rows[0][:5], ["Rank", "Name", "Rating", "Performance", "Score"])
         self.assertTrue(any(row[3] for row in rows[1:]))
 
+    def test_performance_column_is_hidden_until_computed(self):
+        slug = self._create_tournament(name="No Performance Tournament")
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                """
+                UPDATE tournament
+                SET status = 'completed', public_insights_json = NULL
+                WHERE slug = ?
+                """,
+                (slug,),
+            )
+            db.commit()
+        self._publish_tournament(slug)
+
+        response = self.client.get(f"/t/{slug}?view=standings")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"<th>Performance</th>", response.data)
+
+        response = self.client.get(f"/admin/t/{slug}/export.csv")
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.reader(io.StringIO(response.data.decode("utf-8"))))
+        self.assertEqual(rows[0][:4], ["Rank", "Name", "Rating", "Score"])
+        self.assertNotIn("Performance", rows[0])
+
     def test_admin_only_shows_top_10_secondary_prize_rankings(self):
         slug = self._create_tournament(name="Secondary Prize Tournament")
         insights = {
@@ -956,7 +981,7 @@ class TournamentAppTestCase(unittest.TestCase):
             db = get_db()
             row = db.execute(
                 """
-                SELECT e.seed_rating, e.imported_name
+                SELECT e.seed_rating, e.imported_name, e.is_active
                 FROM tournament_entry e
                 JOIN tournament t ON t.id = e.tournament_id
                 WHERE t.slug = ? AND e.imported_name = 'Manual Player'
@@ -965,6 +990,7 @@ class TournamentAppTestCase(unittest.TestCase):
             ).fetchone()
         self.assertIsNotNone(row)
         self.assertEqual(row["seed_rating"], 1750)
+        self.assertEqual(row["is_active"], 1)
 
     def test_late_added_player_is_out_for_existing_rounds(self):
         slug = self._create_tournament(name="Late Entry Tournament")
