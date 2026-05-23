@@ -138,7 +138,7 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(slug.encode("utf-8"), response.data)
 
-    def test_public_boards_show_result_as_middle_column(self):
+    def test_public_boards_show_scores_next_to_players(self):
         slug = self._create_tournament(name="Public Boards Tournament")
         self._set_all_entries_active(slug)
         self._login()
@@ -149,10 +149,20 @@ class TournamentAppTestCase(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
         white_index = response.data.index(b'<th class="public-player-col public-player-col-white">White</th>')
+        white_score_index = response.data.index(b'<th class="align-center public-score-col">Score</th>')
         result_index = response.data.index(b'<th class="align-center public-result-col">Result</th>')
+        black_score_index = response.data.index(
+            b'<th class="align-center public-score-col">Score</th>',
+            white_score_index + 1,
+        )
         black_index = response.data.index(b'<th class="public-player-col public-player-col-black">Black</th>')
         self.assertLess(white_index, result_index)
+        self.assertLess(white_index, white_score_index)
+        self.assertLess(white_score_index, result_index)
         self.assertLess(result_index, black_index)
+        self.assertLess(result_index, black_score_index)
+        self.assertLess(black_score_index, black_index)
+        self.assertIn(b"0.0", response.data)
 
     def test_admin_round_cards_render_score_buttons_for_results(self):
         self._login()

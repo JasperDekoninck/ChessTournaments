@@ -884,6 +884,11 @@ tr.is-waitlist .waitlist-note {
   width: 8.5rem;
 }
 
+.public-boards-table .public-score-col {
+  width: 4.5rem;
+  white-space: nowrap;
+}
+
 .public-boards-table .public-player-col-black {
   text-align: right;
 }

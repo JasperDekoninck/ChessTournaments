@@ -173,12 +173,21 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
     if not final_standings and not (tournament["status"] == "completed" and selected_round == latest_round):
         standings_round = selected_round
     standings = compute_standings(db, tournament["id"], through_round=standings_round)
+    standings_by_entry = {row["entry_id"]: row for row in standings}
+    pairing_rows = []
+    for pairing in pairings:
+        row = dict(pairing)
+        white_standing = standings_by_entry.get(row["white_entry_id"])
+        black_standing = standings_by_entry.get(row["black_entry_id"])
+        row["white_score"] = float(white_standing["score"]) if white_standing else None
+        row["black_score"] = float(black_standing["score"]) if black_standing else None
+        pairing_rows.append(row)
     podium = standings[:3] if tournament["status"] == "completed" else []
     return {
         "round_numbers": round_numbers,
         "selected_round": selected_round,
         "latest_round": latest_round,
-        "pairings": pairings,
+        "pairings": pairing_rows,
         "standings": standings,
         "podium": podium,
         "tournament_insights": tournament_insights(tournament),

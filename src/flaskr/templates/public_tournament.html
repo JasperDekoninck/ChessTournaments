@@ -99,7 +99,9 @@
             <tr>
               <th>Board</th>
               <th class="public-player-col public-player-col-white">White</th>
+              <th class="align-center public-score-col">Score</th>
               <th class="align-center public-result-col">Result</th>
+              <th class="align-center public-score-col">Score</th>
               <th class="public-player-col public-player-col-black">Black</th>
             </tr>
           </thead>
@@ -114,7 +116,21 @@
                     -
                   {% endif %}
                 </td>
+                <td class="align-center public-score-col">
+                  {% if pairing.white_score is not none %}
+                    {{ "%.1f"|format(pairing.white_score) }}
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
                 <td class="align-center public-result-col">{{ pairing.result_code or "Pending" }}</td>
+                <td class="align-center public-score-col">
+                  {% if pairing.black_entry_id and pairing.black_score is not none %}
+                    {{ "%.1f"|format(pairing.black_score) }}
+                  {% elif pairing.black_entry_id %}
+                    -
+                  {% endif %}
+                </td>
                 <td class="public-player-col public-player-col-black">
                   {% if pairing.black_entry_id %}
                     <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.black_entry_id) }}">{{ pairing.black_name }}</a>
