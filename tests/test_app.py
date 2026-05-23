@@ -895,6 +895,105 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(rows[0][:4], ["Rank", "Name", "Rating", "Score"])
         self.assertNotIn("Performance", rows[0])
 
+    def test_completed_tournament_views_use_post_tournament_rating_when_available(self):
+        self._login()
+        response = self.client.post(
+            "/admin/tournaments",
+            data={"name": "Post Rating Display Tournament", "event_date": "2026-04-16", "rounds_planned": "1"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            db = get_db()
+            slug = db.execute(
+                "SELECT slug FROM tournament WHERE name = 'Post Rating Display Tournament'"
+            ).fetchone()["slug"]
+
+        for name, rating in (("Alpha Example", 1600), ("Beta Example", 1500)):
+            response = self.client.post(
+                f"/admin/t/{slug}/entries",
+                data={"name": name, "declared_rating": str(rating)},
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            db = get_db()
+            db.execute(
+                "UPDATE tournament SET registration_form_json = ? WHERE slug = ?",
+                (json.dumps([{"type": "text", "label": "Club", "options": []}]), slug),
+            )
+            db.commit()
+
+        self._set_all_entries_active(slug)
+        response = self.client.post(f"/admin/t/{slug}/round/1/generate", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+
+        with self.app.app_context():
+            db = get_db()
+            tournament = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()
+            pairing = fetch_pairings(db, tournament["id"], 1)[0]
+            seed_ratings = {
+                row["imported_name"]: row["seed_rating"]
+                for row in db.execute(
+                    """
+                    SELECT imported_name, seed_rating
+                    FROM tournament_entry
+                    WHERE tournament_id = ?
+                    """,
+                    (tournament["id"],),
+                ).fetchall()
+            }
+
+        result = "1-0" if pairing["white_name"] == "Beta Example" else "0-1"
+        response = self.client.post(
+            f"/admin/t/{slug}/round/1/save",
+            data={
+                "board_count": "1",
+                "white_1": str(pairing["white_entry_id"]),
+                "black_1": str(pairing["black_entry_id"]),
+                "result_1": result,
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        response = self.client.post(f"/admin/t/{slug}/complete", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self._publish_tournament(slug)
+
+        with self.app.app_context():
+            profile = get_player_profile("Beta Example")
+
+        self.assertIsNotNone(profile)
+        post_rating = profile["rating"]
+        seed_rating = seed_ratings["Beta Example"]
+        self.assertNotEqual(post_rating, seed_rating)
+
+        response = self.client.get(f"/t/{slug}?view=standings")
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        standings_start = html.index('class="public-standings-table"')
+        standings_table = html[standings_start : html.index("</table>", standings_start)]
+        self.assertIn(f"<td>{post_rating}</td>", standings_table)
+        self.assertNotIn(f"<td>{seed_rating}</td>", standings_table)
+
+        response = self.client.get(f"/admin/t/{slug}")
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode("utf-8")
+        player_info_start = html.index("<h3>Player information</h3>")
+        player_info_table = html[player_info_start : html.index("admin-danger-zone", player_info_start)]
+        self.assertIn(f"<td>{post_rating}</td>", player_info_table)
+        self.assertNotIn(f"<td>{seed_rating}</td>", player_info_table)
+
+        response = self.client.get(f"/admin/t/{slug}/export.csv")
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.reader(io.StringIO(response.data.decode("utf-8"))))
+        rating_index = rows[0].index("Rating")
+        beta_row = next(row for row in rows[1:] if row[1] == "Beta Example")
+        self.assertEqual(beta_row[rating_index], str(post_rating))
+        self.assertNotEqual(beta_row[rating_index], str(seed_rating))
+
     def test_admin_only_shows_top_10_secondary_prize_rankings(self):
         slug = self._create_tournament(name="Secondary Prize Tournament")
         insights = {
@@ -1303,7 +1402,7 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertIn(b"Draws:</strong> 0", response.data)
         self.assertIn(b"Games:</strong> 1", response.data)
 
-    def test_current_round_pairings_can_include_late_player_after_marking_them_in(self):
+    def test_current_round_pairings_can_include_late_active_player_after_marking_them_in(self):
         self._login()
         response = self.client.post(
             "/admin/tournaments",
@@ -1342,16 +1441,24 @@ class TournamentAppTestCase(unittest.TestCase):
             tournament = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()
             ana_entry = db.execute(
                 """
-                SELECT e.id
+                SELECT e.id, e.is_active
                 FROM tournament_entry e
                 WHERE e.tournament_id = ? AND e.imported_name = 'Ana Example'
                 """,
                 (tournament["id"],),
             ).fetchone()
+            ana_round_one = db.execute(
+                "SELECT is_available FROM entry_round_status WHERE entry_id = ? AND round_no = 1",
+                (ana_entry["id"],),
+            ).fetchone()
             initial_pairings = fetch_pairings(db, tournament["id"], 1)
 
+        self.assertEqual(ana_entry["is_active"], 1)
+        self.assertEqual(ana_round_one["is_available"], 0)
+
         response = self.client.post(
-            f"/admin/t/{slug}/entries/{ana_entry['id']}/toggle",
+            f"/admin/t/{slug}/entries/{ana_entry['id']}/availability",
+            data={"round_no": "1"},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)

@@ -439,7 +439,7 @@
               <tr>
                 <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=entry.id) }}">{{ entry.imported_name }}</a></td>
                 <td>{{ entry.imported_email or entry.player_email or "—" }}</td>
-                <td>{{ entry.seed_rating }}</td>
+                <td>{{ row.rating }}</td>
                 <td data-player-info-score="{{ entry.id }}">{{ "%.1f"|format(row.score) }}</td>
                 {% for value in row.field_values %}
                   <td>{{ value or "—" }}</td>

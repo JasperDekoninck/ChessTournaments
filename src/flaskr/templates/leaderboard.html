@@ -2,18 +2,15 @@
 {% block title %}Leaderboard{% endblock %}
 {% block content %}
 <section class="section">
-  <p class="kicker">Leaderboard</p>
   <h1>Leaderboard</h1>
-  <p class="lede">Current club ranking rebuilt locally from the integrated rating engine.</p>
 </section>
 
 <section class="section">
   <div class="section-heading">
     <h2>Players</h2>
-    <a href="{{ url_for('web.export_anonymous_leaderboard') }}">CSV</a>
   </div>
   <div class="table-wrap">
-    <table>
+    <table class="compact-table">
       <thead>
         <tr>
           <th>Rank</th>

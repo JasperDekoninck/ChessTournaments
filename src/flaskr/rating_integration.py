@@ -962,8 +962,6 @@ def rebuild_current_manager(db):
         manager.player_database,
         manager.game_database,
         manager.tournament_database,
-        save_folder=current_app.config["EXPORT_DIR"],
-        file_name="anonymous_leaderboard.csv",
         data_dir=current_app.config["RATING_DATA_DIR"],
     )
 
@@ -1210,6 +1208,35 @@ def _compute_tournament_insights_from_manager(manager: Manager, manager_tourname
     }
 
 
+def tournament_post_ratings(tournament) -> dict[str, int]:
+    if tournament is None or tournament["status"] != "completed":
+        return {}
+    manager, _stamp = _preferred_manager()
+    if manager is None:
+        return {}
+    manager_tournament = _resolve_manager_tournament(manager, tournament["name"], tournament["event_date"])
+    if manager_tournament is None:
+        return {}
+
+    ratings = {}
+    event_date = manager_tournament.get_date()
+    for player in manager_tournament.get_players(
+        manager.player_database,
+        manager.game_database,
+        manager.rating_system,
+    ):
+        try:
+            rating = player.get_rating_at_date(event_date, next=True)
+        except Exception:
+            continue
+        if rating is None:
+            continue
+        rounded = round_rating_value(rating.rating)
+        if rounded is not None:
+            ratings[normalize_name(player.name)] = rounded
+    return ratings
+
+
 def _parse_stored_insights(value: str | None) -> dict | None:
     if not value:
         return None
@@ -1366,20 +1393,13 @@ def get_player_history(player_name: str):
 
 
 def anonymous_leaderboard_rows():
-    manager_path = _manager_path("current")
-    export_path = Path(current_app.config["EXPORT_DIR"]) / "anonymous_leaderboard.csv"
-    if export_path.exists() and (
-        not manager_path.exists() or export_path.stat().st_mtime_ns >= manager_path.stat().st_mtime_ns
-    ):
-        return _cached_csv_rows(export_path)
-    if not manager_path.exists():
+    if not _manager_path("current").exists():
         return []
+    manager = current_manager()
     frame = AnonymousLeaderboard.compute(
-        current_manager().player_database,
-        current_manager().game_database,
-        current_manager().tournament_database,
-        save_folder=current_app.config["EXPORT_DIR"],
-        file_name="anonymous_leaderboard.csv",
+        manager.player_database,
+        manager.game_database,
+        manager.tournament_database,
         data_dir=current_app.config["RATING_DATA_DIR"],
     )
     return frame.to_dict("records")

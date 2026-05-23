@@ -5,19 +5,16 @@ import hashlib
 import io
 import json
 from math import ceil
-from pathlib import Path
 
 from flask import (
     Blueprint,
     Response,
     abort,
-    current_app,
     flash,
     jsonify,
     redirect,
     render_template,
     request,
-    send_file,
     session,
     url_for,
 )
@@ -78,6 +75,7 @@ from .rating_integration import (
     set_member_override,
     set_member_since_date,
     sync_member_statuses,
+    tournament_post_ratings,
     tournament_insights,
 )
 
@@ -194,6 +192,26 @@ def _annotate_performance_ratings(db, tournament, standings: list[dict], insight
     return insights
 
 
+def _annotate_display_ratings(db, tournament, standings: list[dict]) -> None:
+    post_ratings = tournament_post_ratings(tournament)
+    entries_by_id = {row["id"]: row for row in fetch_entries(db, tournament["id"])}
+    for row in standings:
+        entry = entries_by_id.get(row["entry_id"])
+        candidate_names = [row["name"]]
+        if entry and entry["canonical_rating_name"]:
+            candidate_names.append(entry["canonical_rating_name"])
+        post_rating = next(
+            (
+                post_ratings[normalize_name(name)]
+                for name in candidate_names
+                if name and normalize_name(name) in post_ratings
+            ),
+            None,
+        )
+        row["display_rating"] = post_rating if post_rating is not None else row["seed_rating"]
+        row["has_post_tournament_rating"] = post_rating is not None
+
+
 def _has_performance_ratings(standings: list[dict]) -> bool:
     return any(row.get("performance_rating") is not None for row in standings)
 
@@ -211,6 +229,7 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
     if not final_standings and not (tournament["status"] == "completed" and selected_round == latest_round):
         standings_round = selected_round
     standings = compute_standings(db, tournament["id"], through_round=standings_round)
+    _annotate_display_ratings(db, tournament, standings)
     insights = _annotate_performance_ratings(db, tournament, standings)
     standings_by_entry = {row["entry_id"]: row for row in standings}
     pairing_rows = []
@@ -264,6 +283,7 @@ def _admin_tournament_url(slug: str, round_no: int | None = None) -> str:
 def _tournament_standings_csv(tournament) -> str:
     db = get_db()
     standings = compute_standings(db, tournament["id"])
+    _annotate_display_ratings(db, tournament, standings)
     _annotate_performance_ratings(db, tournament, standings)
     has_performance_ratings = _has_performance_ratings(standings)
     output = io.StringIO()
@@ -274,7 +294,7 @@ def _tournament_standings_csv(tournament) -> str:
     header.extend(["Score", tournament["primary_tiebreak_label"], tournament["secondary_tiebreak_label"]])
     writer.writerow(header)
     for row in standings:
-        csv_row = [row["rank"], row["name"], row["seed_rating"]]
+        csv_row = [row["rank"], row["name"], row["display_rating"]]
         if has_performance_ratings:
             csv_row.append(row["performance_rating"] if row["performance_rating"] is not None else "")
         csv_row.extend([f"{float(row['score']):.1f}", f"{float(row['bh']):.1f}", f"{float(row['bh_c1']):.1f}"])
@@ -359,9 +379,13 @@ def _player_information_rows(entries, standings_by_entry: dict, registration_fie
                 value = answers[index]["value"]
             field_values.append(value or "")
         standing = standings_by_entry.get(entry["id"])
+        rating = entry["seed_rating"]
+        if standing:
+            rating = standing.get("display_rating", standing.get("seed_rating", rating))
         rows.append(
             {
                 "entry": entry,
+                "rating": rating,
                 "score": float(standing["score"]) if standing else 0.0,
                 "field_values": field_values,
             }
@@ -1075,6 +1099,7 @@ def admin_tournament_detail(slug: str):
     entries = _order_admin_entries(fetch_entries(db, tournament["id"]), pairings)
     availability = fetch_availability(db, tournament["id"])
     standings = compute_standings(db, tournament["id"])
+    _annotate_display_ratings(db, tournament, standings)
     standings_by_entry = {row["entry_id"]: row for row in standings}
     registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
     round_panels = _round_panels(tournament, entries, availability)
@@ -1465,17 +1490,3 @@ def export_tournament(slug: str):
         mimetype="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{slug}-leaderboard.csv"'},
     )
-
-
-@bp.route("/leaderboard.csv")
-@bp.route("/anonymous-leaderboard.csv")
-def export_anonymous_leaderboard():
-    export_path = Path(current_app.config["EXPORT_DIR"]) / "anonymous_leaderboard.csv"
-    if not export_path.exists():
-        rows = anonymous_leaderboard_rows()
-        header = "Rank,Name,Rating,Wins,Losses,Draws\n"
-        body = "\n".join(
-            f"{row['Rank']},{row['Name']},{row['Rating']},{row['Wins']},{row['Losses']},{row['Draws']}" for row in rows
-        )
-        return Response(f"{header}{body}\n", mimetype="text/csv")
-    return send_file(export_path, mimetype="text/csv", as_attachment=True, download_name="anonymous_leaderboard.csv")

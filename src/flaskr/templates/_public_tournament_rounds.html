@@ -101,7 +101,7 @@
             <tr>
               <td>{{ row.rank }}</td>
               <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=row.entry_id) }}">{{ row.name }}</a></td>
-              <td>{{ row.seed_rating }}</td>
+              <td>{{ row.display_rating }}</td>
               {% if has_performance_ratings %}
                 <td>{{ row.performance_rating if row.performance_rating is not none else "-" }}</td>
               {% endif %}
