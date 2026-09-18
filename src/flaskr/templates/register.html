@@ -20,14 +20,17 @@
           {% if tournament.event_time %} · {{ tournament.event_time }}{% endif %}
           {% if tournament.venue %} · {{ tournament.venue }}{% endif %}
         </p>
-        <p class="registration-meta">{{ counts.confirmed_count }}{% if tournament.max_registrations %}/{{ tournament.max_registrations }}{% endif %} confirmed{% if counts.waitlist_count %} · {{ counts.waitlist_count }} on the waiting list{% endif %}</p>
+        <p class="registration-meta">{{ counts.confirmed_count }}{% if tournament.max_registrations %}/{{ tournament.max_registrations }}{% endif %} {{ "teams confirmed" if tournament.is_team else "confirmed" }}{% if counts.waitlist_count %} · {{ counts.waitlist_count }} on the waiting list{% endif %}{% if tournament.excludes_rating %} · Unrated{% endif %}</p>
       </div>
     </div>
     {% if tournament.max_registrations and counts.confirmed_count >= tournament.max_registrations %}
       <p class="flash flash-warning">This tournament is currently full. New registrations will be placed on the waiting list.</p>
     {% endif %}
-    <form method="post" action="{{ url_for('web.submit_registration', slug=tournament.slug) }}" class="stack-form registration-form" data-register-search>
+    <form method="post" action="{{ url_for('web.submit_registration', slug=tournament.slug) }}" class="stack-form registration-form" {{ 'data-team-registration' if tournament.is_team else 'data-register-search' }}>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if tournament.is_team %}
+        {% include "_team_registration_fields.html" %}
+      {% else %}
       <label class="autocomplete-field">
         Name
         <input type="text" name="name" autocomplete="off" required data-player-name>
@@ -41,6 +44,7 @@
         Rating (optional)
         <input type="number" name="declared_rating" min="0" max="4000" data-player-rating>
       </label>
+      {% endif %}
       {% for field in registration_fields %}
         <label>
           {{ field.label }}
@@ -59,7 +63,7 @@
       <button type="submit">Register</button>
     </form>
     <p class="registration-note">
-      We store your data only for the purpose of registering for this tournament, computing your Polyrating, showing your results, and determining your eligibility for certain prizes that will be handed out at the tournament. It will not be sent to any third party and it will not be used for any other purposes. By registering for this tournament, you agree that your data is used for this purpose.
+      We store your data only for the purpose of registering for this tournament, {% if tournament.is_team %}assigning teams, {% endif %}{% if not tournament.excludes_rating %}computing your Polyrating, {% endif %}showing your results, and determining your eligibility for certain prizes that will be handed out at the tournament. It will not be sent to any third party and it will not be used for any other purposes. By registering for this tournament, you agree that your data is used for this purpose.
     </p>
   </section>
 {% else %}
@@ -72,4 +76,5 @@
 
 {% block scripts %}
   <script src="{{ url_for('static', filename='register.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='team_registration.js') }}" defer></script>
 {% endblock %}

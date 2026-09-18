@@ -2,9 +2,13 @@
 {% block title %}{{ entry.imported_name }}{% endblock %}
 {% block content %}
 <section class="section">
-  <p class="kicker">Player History</p>
+  <p class="kicker">{{ "Team Results" if tournament.is_team else "Player History" }}</p>
   <h1>{{ entry.imported_name }}</h1>
-  <p class="lede">Previous rated games linked to {{ entry.canonical_rating_name or entry.imported_name }}.</p>
+  {% if tournament.is_team %}
+    <p class="lede"><a href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">{{ tournament.name }}</a></p>
+  {% else %}
+    <p class="lede">Previous rated games linked to {{ entry.canonical_rating_name or entry.imported_name }}.</p>
+  {% endif %}
   {% if profile %}
     <div class="profile-summary">
       <span><strong>Rating:</strong> {{ profile.rating if profile.rating is not none else "—" }}</span>

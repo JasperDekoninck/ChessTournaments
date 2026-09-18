@@ -9,6 +9,8 @@
     {% if tournament.event_time %} · {{ tournament.event_time }}{% endif %}
     {% if tournament.venue %} · {{ tournament.venue }}{% endif %}
     · {{ tournament.rounds_planned }} rounds
+    {% if tournament.is_team %} · Teams{% endif %}
+    {% if tournament.excludes_rating %} · Unrated{% endif %}
   </p>
 </section>
 

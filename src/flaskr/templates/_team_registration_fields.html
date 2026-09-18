@@ -1,0 +1,27 @@
+<label>
+  Registration type
+  <select name="registration_mode" data-registration-mode>
+    <option value="team">Register a team</option>
+    <option value="solo">Register alone</option>
+  </select>
+</label>
+<div class="stack-form" data-team-fields>
+  <label>
+    Team name
+    <input type="text" name="team_name" required>
+  </label>
+  <label>
+    Member email addresses
+    <textarea name="member_emails" rows="3" placeholder="alex@example.com, sam@example.com" required></textarea>
+  </label>
+</div>
+<div class="stack-form" data-solo-fields hidden>
+  <label>
+    Your name
+    <input type="text" name="name" autocomplete="name" required disabled>
+  </label>
+  <label>
+    Your email
+    <input type="email" name="email" autocomplete="email" required disabled>
+  </label>
+</div>

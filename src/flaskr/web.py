@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import sqlite3
 from math import ceil
 
 from flask import (
@@ -20,12 +21,14 @@ from flask import (
 )
 
 from .auth import login_required, set_admin_password, verify_password
-from .mailer import send_registration_email, send_waitlist_confirmation_email
+from .mailer import send_email, send_registration_email, send_waitlist_confirmation_email
+from .teams import assign_team_members, parse_member_emails, register_team_members, team_members, validate_team_name
 from .core import (
     VALID_RESULTS,
     attach_entries_to_tournament,
     compact_waitlist,
     compute_standings,
+    counts_for_rating,
     ensure_round_status_rows,
     ensure_entry_round_status_rows,
     fetch_active_tournament,
@@ -288,13 +291,17 @@ def _tournament_standings_csv(tournament) -> str:
     has_performance_ratings = _has_performance_ratings(standings)
     output = io.StringIO()
     writer = csv.writer(output)
-    header = ["Rank", "Name", "Rating"]
+    header = ["Rank", "Team" if tournament["is_team"] else "Name"]
+    if not tournament["is_team"]:
+        header.append("Rating")
     if has_performance_ratings:
         header.append("Performance")
     header.extend(["Score", tournament["primary_tiebreak_label"], tournament["secondary_tiebreak_label"]])
     writer.writerow(header)
     for row in standings:
-        csv_row = [row["rank"], row["name"], row["display_rating"]]
+        csv_row = [row["rank"], row["name"]]
+        if not tournament["is_team"]:
+            csv_row.append(row["display_rating"])
         if has_performance_ratings:
             csv_row.append(row["performance_rating"] if row["performance_rating"] is not None else "")
         csv_row.extend([f"{float(row['score']):.1f}", f"{float(row['bh']):.1f}", f"{float(row['bh_c1']):.1f}"])
@@ -679,6 +686,9 @@ def submit_registration(slug: str):
         flash_warning("Registration is not open for this tournament.")
         return redirect(url_for("web.register"))
 
+    if tournament["is_team"]:
+        return _submit_team_registration(tournament)
+
     name = (request.form.get("name") or "").strip()
     if not name:
         flash_error("Your name is required.")
@@ -807,6 +817,51 @@ def submit_registration(slug: str):
     return redirect(url_for("web.register"))
 
 
+def _submit_team_registration(tournament, admin: bool = False):
+    db = get_db()
+    destination = url_for("web.admin_tournament_detail", slug=tournament["slug"]) if admin else url_for("web.register")
+    if tournament["status"] == "completed":
+        flash_error("This tournament is finished.")
+        return redirect(destination)
+    mode = request.form.get("registration_mode", "team")
+    solo = mode == "solo"
+    name = (request.form.get("name" if solo else "team_name") or "").strip()
+    fields = parse_registration_form_fields(tournament["registration_form_json"])
+    answers, error = _registration_answers_from_request(fields)
+    try:
+        if mode not in {"team", "solo"}:
+            raise ValueError("Choose team or solo registration.")
+        if error:
+            raise ValueError(error)
+        emails = parse_member_emails(request.form.get("email" if solo else "member_emails") or "")
+        db.execute("BEGIN IMMEDIATE")
+        entry_id, waitlist_position = register_team_members(
+            db, tournament, name=name, emails=emails, solo=solo,
+            answers=json.dumps(answers) if answers else None,
+            source="admin" if admin else "public",
+        )
+        db.commit()
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        db.rollback()
+        flash_error(str(exc) if isinstance(exc, ValueError) else "A member is already registered for this tournament.")
+        return redirect(destination)
+    if entry_id is not None:
+        ensure_entry_round_status_rows(db, entry_id, tournament["rounds_planned"], (latest_paired_round(db, tournament["id"]) or 0) + 1)
+    if not admin:
+        for email in emails:
+            if solo:
+                send_email(email, f"Awaiting a team for {tournament['name']}", f"Hello {name},\n\nYour solo registration for {tournament['name']} is received. You are awaiting team assignment by the organizers.")
+            else:
+                send_registration_email(tournament, {"name": name, "email": email}, waitlist_position)
+    if solo:
+        flash_success("Your solo registration is received. You are awaiting team assignment.")
+    elif waitlist_position is not None:
+        flash_warning(f"{name} is on the waiting list in position {waitlist_position}.")
+    else:
+        flash_success(f"{name} is registered for {tournament['name']}.")
+    return redirect(destination)
+
+
 @bp.route("/players/<path:player_name>")
 def leaderboard_player(player_name: str):
     db = get_db()
@@ -833,13 +888,22 @@ def player_history(slug: str, entry_id: int):
           p.email AS player_email,
           p.canonical_rating_name
         FROM tournament_entry e
-        JOIN player p ON p.id = e.player_id
+        LEFT JOIN player p ON p.id = e.player_id
         WHERE e.id = ? AND e.tournament_id = ?
         """,
         (entry_id, tournament["id"]),
     ).fetchone()
     if entry is None:
         abort(404)
+    if tournament["is_team"]:
+        games = [
+            {"date": tournament["event_date"], "tournament_name": tournament["name"],
+             "white": pairing["white_name"], "black": pairing["black_name"] or "Bye",
+             "result": pairing["result_code"] or "Pending"}
+            for pairing in fetch_pairings(db, tournament["id"])
+            if entry_id in (pairing["white_entry_id"], pairing["black_entry_id"])
+        ]
+        return render_template("player_history.html", tournament=tournament, entry=entry, profile=None, games=games, admin_email=None)
     player_name = entry["canonical_rating_name"] or entry["imported_name"]
     profile = get_player_profile(player_name)
     return render_template(
@@ -965,18 +1029,24 @@ def create_tournament():
     event_date = (request.form.get("event_date") or "").strip()
     rounds_planned = parse_int(request.form.get("rounds_planned"), default=7)
     csv_file = request.files.get("registrations")
+    is_team = request.form.get("is_team") == "1"
+    excludes_rating = is_team or request.form.get("excludes_rating") == "1"
     if not name or not event_date:
         flash_error("Tournament name and date are required.")
+        return redirect(url_for("web.admin"))
+    if is_team and csv_file and csv_file.filename:
+        flash_error("Create the team tournament without a player CSV, then add teams or solo registrations.")
         return redirect(url_for("web.admin"))
     slug = unique_slug(db, slugify(name))
     cursor = db.execute(
         """
         INSERT INTO tournament (
           name, slug, event_date, rounds_planned, registration_csv_name, status,
-          source_type, primary_tiebreak_label, secondary_tiebreak_label, is_public, is_active_public
-        ) VALUES (?, ?, ?, ?, ?, 'draft', 'local', 'BH', 'BH-C1', 0, 0)
+          source_type, primary_tiebreak_label, secondary_tiebreak_label, is_public, is_active_public,
+          excludes_rating, is_team
+        ) VALUES (?, ?, ?, ?, ?, 'draft', 'local', 'BH', 'BH-C1', 0, 0, ?, ?)
         """,
-        (name, slug, event_date, rounds_planned, csv_file.filename if csv_file else None),
+        (name, slug, event_date, rounds_planned, csv_file.filename if csv_file else None, int(excludes_rating), int(is_team)),
     )
     db.commit()
     if csv_file and csv_file.filename:
@@ -1001,6 +1071,8 @@ def add_entry(slug: str):
     tournament = _tournament_or_404(slug)
     if not _ensure_editable(tournament):
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    if tournament["is_team"]:
+        return _submit_team_registration(tournament, admin=True)
     name = (request.form.get("name") or "").strip()
     if not name:
         flash_error("Player name is required.")
@@ -1021,6 +1093,76 @@ def add_entry(slug: str):
     )
     attach_entries_to_tournament(db, tournament["id"], [row], build_matcher(), default_active=True)
     flash_success(f"Added {name}.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/settings")
+@login_required
+def update_tournament_settings(slug: str):
+    db = get_db()
+    tournament = _tournament_or_404(slug)
+    if not _ensure_editable(tournament):
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    is_team = request.form.get("is_team") == "1"
+    excludes_rating = is_team or request.form.get("excludes_rating") == "1"
+    if is_team != bool(tournament["is_team"]) and (
+        db.execute("SELECT 1 FROM tournament_entry WHERE tournament_id = ?", (tournament["id"],)).fetchone()
+        or team_members(db, tournament["id"])
+        or latest_paired_round(db, tournament["id"]) is not None
+        or tournament["status"] == "completed"
+    ):
+        flash_error("Tournament format can only be changed before registration or pairings begin.")
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    db.execute(
+        "UPDATE tournament SET excludes_rating = ?, is_team = ?, public_insights_json = NULL WHERE id = ?",
+        (int(excludes_rating), int(is_team), tournament["id"]),
+    )
+    db.commit()
+    if excludes_rating != bool(tournament["excludes_rating"]) and tournament["status"] == "completed":
+        rebuild_current_manager(db)
+    flash_success("Tournament settings updated.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/teams/assign")
+@login_required
+def assign_team(slug: str):
+    db = get_db()
+    tournament = _tournament_or_404(slug)
+    if not tournament["is_team"] or tournament["is_historical"] or tournament["status"] == "completed":
+        abort(400)
+    try:
+        member_ids = [int(value) for value in request.form.getlist("member_id")]
+        existing_entry_id = int(request.form["existing_entry_id"]) if request.form.get("existing_entry_id") else None
+        db.execute("BEGIN IMMEDIATE")
+        entry_id = assign_team_members(db, tournament, member_ids, (request.form.get("team_name") or "").strip(), existing_entry_id)
+        db.commit()
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        db.rollback()
+        flash_error(str(exc) if isinstance(exc, ValueError) else "These members could not be assigned.")
+    else:
+        ensure_entry_round_status_rows(db, entry_id, tournament["rounds_planned"], (latest_paired_round(db, tournament["id"]) or 0) + 1)
+        flash_success("Team assignment saved.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/teams/<int:entry_id>/name")
+@login_required
+def rename_team(slug: str, entry_id: int):
+    db = get_db()
+    tournament = _tournament_or_404(slug)
+    entry = db.execute("SELECT id FROM tournament_entry WHERE id = ? AND tournament_id = ?", (entry_id, tournament["id"])).fetchone()
+    if not tournament["is_team"] or not entry or tournament["is_historical"]:
+        abort(404)
+    name = (request.form.get("team_name") or "").strip()
+    try:
+        validate_team_name(db, tournament["id"], name, entry_id)
+    except ValueError as exc:
+        flash_error(str(exc))
+    else:
+        db.execute("UPDATE tournament_entry SET imported_name = ? WHERE id = ?", (name, entry_id))
+        db.commit()
+        flash_success("Team name updated.")
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
 
@@ -1097,6 +1239,7 @@ def admin_tournament_detail(slug: str):
     ensure_round_status_rows(db, tournament["id"], tournament["rounds_planned"])
     pairings = fetch_pairings(db, tournament["id"])
     entries = _order_admin_entries(fetch_entries(db, tournament["id"]), pairings)
+    members = team_members(db, tournament["id"]) if tournament["is_team"] else []
     availability = fetch_availability(db, tournament["id"])
     standings = compute_standings(db, tournament["id"])
     _annotate_display_ratings(db, tournament, standings)
@@ -1116,6 +1259,8 @@ def admin_tournament_detail(slug: str):
         registration_fields=registration_fields,
         player_information_rows=_player_information_rows(entries, standings_by_entry, registration_fields),
         entries=entries,
+        team_members=members,
+        team_member_answers={member["id"]: _parse_registration_answers(member["registration_answers_json"]) for member in members},
         registration_summary=registration_counts(db, tournament["id"]),
         availability=availability,
         standings=standings,
@@ -1179,6 +1324,7 @@ def reset_tournament_registrations(slug: str):
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
     was_completed = tournament["status"] == "completed"
     db.execute("DELETE FROM pairing WHERE tournament_id = ?", (tournament["id"],))
+    db.execute("DELETE FROM team_member WHERE tournament_id = ?", (tournament["id"],))
     db.execute("DELETE FROM tournament_entry WHERE tournament_id = ?", (tournament["id"],))
     db.execute(
         """
@@ -1307,10 +1453,13 @@ def confirm_waitlist_entry(slug: str, entry_id: int):
     )
     db.commit()
     compact_waitlist(db, tournament["id"])
-    sent, error = send_waitlist_confirmation_email(
-        tournament,
-        {"name": entry["imported_name"], "email": entry["imported_email"]},
-    )
+    recipients = [member["email"] for member in team_members(db, tournament["id"]) if member["entry_id"] == entry_id] if tournament["is_team"] else [entry["imported_email"]]
+    deliveries = [
+        send_waitlist_confirmation_email(tournament, {"name": entry["imported_name"], "email": email})
+        for email in recipients
+    ]
+    sent = all(delivered for delivered, _ in deliveries)
+    error = next((error for delivered, error in deliveries if not delivered), None)
     if sent:
         flash_success(f"{entry['imported_name']} was confirmed and emailed.")
     else:
@@ -1473,6 +1622,10 @@ def complete_tournament(slug: str):
     db.execute("UPDATE tournament SET status = 'completed' WHERE id = ?", (tournament["id"],))
     db.commit()
     persist_final_standings(db, tournament["id"])
+    if not counts_for_rating(tournament):
+        sync_member_statuses(db)
+        flash_success("Tournament finished. Results are excluded from ratings and rating-based prizes.")
+        return redirect(_admin_tournament_url(slug, open_round))
     try:
         rebuild_current_manager(db)
         flash_success("Tournament finished and the leaderboard was updated.")

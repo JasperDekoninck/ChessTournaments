@@ -95,6 +95,8 @@ def migrate_db(db):
 
     tournament_columns = _table_columns(db, "tournament")
     if tournament_columns:
+        _add_column_if_missing(db, "tournament", "excludes_rating", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(db, "tournament", "is_team", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "tournament", "registration_enabled", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "tournament", "registration_opens_at", "TEXT")
         _add_column_if_missing(db, "tournament", "registration_form_json", "TEXT")
@@ -140,6 +142,61 @@ def migrate_db(db):
     if pairing_columns:
         db.execute("CREATE INDEX IF NOT EXISTS idx_pairing_white_entry ON pairing(white_entry_id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_pairing_black_entry ON pairing(black_entry_id)")
+
+    _allow_team_entries(db)
+
+
+def _allow_team_entries(db):
+    columns = db.execute("PRAGMA table_info(tournament_entry)").fetchall()
+    if not any(row["name"] == "player_id" and row["notnull"] for row in columns):
+        return
+    # SQLite requires a table rebuild to make the player reference optional.
+    db.commit()
+    db.execute("PRAGMA foreign_keys = OFF")
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        sequence = db.execute("SELECT seq FROM sqlite_sequence WHERE name = 'tournament_entry'").fetchone()
+        db.execute(
+            """
+            CREATE TABLE tournament_entry_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              tournament_id INTEGER NOT NULL REFERENCES tournament(id) ON DELETE CASCADE,
+              player_id INTEGER REFERENCES player(id) ON DELETE CASCADE,
+              imported_name TEXT NOT NULL,
+              imported_email TEXT,
+              submitted_at TEXT,
+              declared_rating INTEGER,
+              seed_rating INTEGER NOT NULL,
+              member_status TEXT NOT NULL,
+              is_active INTEGER NOT NULL DEFAULT 1,
+              registration_source TEXT,
+              registration_order INTEGER,
+              registration_answers_json TEXT,
+              waitlist_position INTEGER,
+              final_rank INTEGER,
+              final_score REAL,
+              final_primary_tiebreak REAL,
+              final_secondary_tiebreak REAL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE (tournament_id, player_id)
+            )
+            """
+        )
+        column_list = ", ".join(_quote_identifier(row["name"], "column name") for row in columns)
+        db.execute(f"INSERT INTO tournament_entry_new ({column_list}) SELECT {column_list} FROM tournament_entry")
+        db.execute("DROP TABLE tournament_entry")
+        db.execute("ALTER TABLE tournament_entry_new RENAME TO tournament_entry")
+        if sequence is not None:
+            db.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'tournament_entry'", (sequence["seq"],))
+        db.execute("CREATE INDEX idx_tournament_entry_player ON tournament_entry(player_id)")
+        if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise sqlite3.IntegrityError("Tournament entry migration failed its foreign key check.")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.execute("PRAGMA foreign_keys = ON")
 
 
 @click.command("init-db")

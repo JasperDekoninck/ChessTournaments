@@ -29,6 +29,7 @@ from .core import (
     MatchResult,
     attach_entries_to_tournament,
     compute_standings,
+    counts_for_rating,
     ensure_round_status_rows,
     fetch_entries,
     fetch_pairings,
@@ -442,6 +443,7 @@ def sync_player_profiles_from_manager(db, manager: Manager | None = None):
         key = normalize_name(player["canonical_rating_name"] or player["name"])
         row = rows_by_name.get(key)
         if row is None:
+            updates.append((None, None, 0, 0, 0, player["id"]))
             continue
         updates.append(
             (
@@ -867,13 +869,20 @@ def rebuild_current_manager(db):
         """
         SELECT id, name, slug, event_date, rounds_planned
         FROM tournament
-        WHERE status = 'completed' AND is_historical = 0
+        WHERE status = 'completed' AND is_historical = 0 AND excludes_rating = 0 AND is_team = 0
         ORDER BY event_date ASC, id ASC
         """
     ).fetchall()
 
     tournament_export_root = Path(current_app.config["EXPORT_DIR"]) / "tournaments"
     tournament_export_root.mkdir(parents=True, exist_ok=True)
+
+    excluded_tournaments = db.execute(
+        "SELECT id, slug FROM tournament WHERE excludes_rating = 1 OR is_team = 1"
+    ).fetchall()
+    for excluded in excluded_tournaments:
+        db.execute("UPDATE tournament SET public_insights_json = NULL WHERE id = ?", (excluded["id"],))
+        (tournament_export_root / excluded["slug"] / "leaderboard.csv").unlink(missing_ok=True)
 
     for tournament_row in local_tournaments:
         persist_final_standings(db, tournament_row["id"])
@@ -953,7 +962,7 @@ def rebuild_current_manager(db):
         """
         SELECT id, name, slug, event_date, is_historical
         FROM tournament
-        WHERE status = 'completed'
+        WHERE status = 'completed' AND excludes_rating = 0 AND is_team = 0
         ORDER BY event_date ASC, id ASC
         """
     ).fetchall()
@@ -1193,7 +1202,7 @@ def _compute_tournament_insights_from_manager(manager: Manager, manager_tourname
 
 
 def tournament_post_ratings(tournament) -> dict[str, int]:
-    if tournament is None or tournament["status"] != "completed":
+    if not counts_for_rating(tournament) or tournament["status"] != "completed":
         return {}
     manager, _stamp = _preferred_manager()
     if manager is None:
@@ -1239,7 +1248,7 @@ def _insights_include_rankings(insights: dict) -> bool:
 
 
 def tournament_insights(tournament) -> dict | None:
-    if tournament is None or tournament["status"] != "completed":
+    if not counts_for_rating(tournament) or tournament["status"] != "completed":
         return None
     stored = _parse_stored_insights(tournament["public_insights_json"] if "public_insights_json" in tournament.keys() else None)
     if stored is not None and _insights_include_rankings(stored):
@@ -1367,6 +1376,7 @@ def get_player_history(player_name: str):
         LEFT JOIN tournament_entry be ON be.id = p.black_entry_id
         WHERE (we.player_id = ? OR be.player_id = ?)
           AND t.status = 'completed'
+          AND t.excludes_rating = 0 AND t.is_team = 0
           AND p.black_entry_id IS NOT NULL
           AND p.result_code IS NOT NULL
         ORDER BY t.event_date DESC, p.round_no DESC, p.board_no ASC

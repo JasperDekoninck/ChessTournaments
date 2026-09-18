@@ -1718,6 +1718,7 @@ class TournamentAppTestCase(unittest.TestCase):
 
     def test_member_cutoff_uses_played_rounds_only(self):
         self._login()
+        self.client.post("/admin/members/cutoff", data={"member_since_date": "2025-09-01"})
         response = self.client.post(
             "/admin/tournaments",
             data={"name": "Member Logic Tournament", "event_date": "2026-04-16", "rounds_planned": "3"},

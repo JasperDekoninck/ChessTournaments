@@ -86,8 +86,8 @@
         <thead>
           <tr>
             <th>Rank</th>
-            <th>Player</th>
-            <th>Rating</th>
+            <th>{{ "Team" if tournament.is_team else "Player" }}</th>
+            {% if not tournament.is_team %}<th>Rating</th>{% endif %}
             {% if has_performance_ratings %}
               <th>Performance</th>
             {% endif %}
@@ -101,7 +101,7 @@
             <tr>
               <td>{{ row.rank }}</td>
               <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=row.entry_id) }}">{{ row.name }}</a></td>
-              <td>{{ row.display_rating }}</td>
+              {% if not tournament.is_team %}<td>{{ row.display_rating }}</td>{% endif %}
               {% if has_performance_ratings %}
                 <td>{{ row.performance_rating if row.performance_rating is not none else "-" }}</td>
               {% endif %}
@@ -111,7 +111,7 @@
             </tr>
           {% else %}
             <tr>
-              <td colspan="{{ 7 if has_performance_ratings else 6 }}" class="muted">No standings yet.</td>
+              <td colspan="{{ (7 if has_performance_ratings else 6) - (1 if tournament.is_team else 0) }}" class="muted">No standings yet.</td>
             </tr>
           {% endfor %}
         </tbody>

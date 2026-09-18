@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS tournament (
   slug TEXT NOT NULL UNIQUE,
   event_date TEXT NOT NULL,
   rounds_planned INTEGER NOT NULL,
+  excludes_rating INTEGER NOT NULL DEFAULT 0,
+  is_team INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft',
   registration_csv_name TEXT,
   registration_enabled INTEGER NOT NULL DEFAULT 0,
@@ -60,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_member_override_status ON member_override(is_memb
 CREATE TABLE IF NOT EXISTS tournament_entry (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tournament_id INTEGER NOT NULL REFERENCES tournament(id) ON DELETE CASCADE,
-  player_id INTEGER NOT NULL REFERENCES player(id) ON DELETE CASCADE,
+  player_id INTEGER REFERENCES player(id) ON DELETE CASCADE,
   imported_name TEXT NOT NULL,
   imported_email TEXT,
   submitted_at TEXT,
@@ -82,6 +84,19 @@ CREATE TABLE IF NOT EXISTS tournament_entry (
 
 CREATE INDEX IF NOT EXISTS idx_tournament_entry_player
 ON tournament_entry(player_id);
+
+CREATE TABLE IF NOT EXISTS team_member (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tournament_id INTEGER NOT NULL REFERENCES tournament(id) ON DELETE CASCADE,
+  entry_id INTEGER REFERENCES tournament_entry(id) ON DELETE CASCADE,
+  name TEXT,
+  email TEXT NOT NULL COLLATE NOCASE,
+  registration_answers_json TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (tournament_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_member_entry ON team_member(entry_id);
 
 CREATE TABLE IF NOT EXISTS entry_round_status (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

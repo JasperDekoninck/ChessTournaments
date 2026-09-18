@@ -66,6 +66,12 @@ def round_rating_value(value: float | int | None, default: int | None = None) ->
     return -int(abs(numeric) + 0.5)
 
 
+def counts_for_rating(tournament) -> bool:
+    return tournament is not None and not any(
+        tournament[key] for key in ("excludes_rating", "is_team") if key in tournament.keys()
+    )
+
+
 def parse_datetime_local(value: str | None) -> str | None:
     if value is None:
         return None
@@ -163,7 +169,7 @@ def fetch_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team
         FROM tournament
         ORDER BY is_active_public DESC, event_date DESC, id DESC
         """
@@ -177,7 +183,7 @@ def fetch_public_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team
         FROM tournament
         WHERE is_public = 1
         ORDER BY is_active_public DESC, event_date DESC, id DESC
@@ -192,7 +198,7 @@ def fetch_active_tournament(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team
         FROM tournament
         WHERE is_active_public = 1
         ORDER BY event_date DESC, id DESC
@@ -208,7 +214,7 @@ def fetch_tournament_by_slug(db, slug: str):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team
         FROM tournament
         WHERE slug = ?
         """,
@@ -226,7 +232,7 @@ def unique_slug(db, proposed: str) -> str:
 
 
 def registration_open_for_tournament(tournament, current_time: datetime | None = None) -> bool:
-    if tournament is None or tournament["is_historical"]:
+    if tournament is None or tournament["is_historical"] or tournament["status"] == "completed":
         return False
     if not tournament["registration_enabled"]:
         return False
@@ -244,7 +250,7 @@ def fetch_open_registration_tournaments(db, current_time: datetime | None = None
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
-          is_historical, is_public, is_active_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team
         FROM tournament
         WHERE is_historical = 0 AND status != 'completed' AND registration_enabled = 1 AND registration_opens_at IS NOT NULL
         ORDER BY event_date ASC, id ASC
@@ -377,7 +383,7 @@ def fetch_entries(db, tournament_id: int):
           p.historical_losses,
           p.historical_draws
         FROM tournament_entry e
-        JOIN player p ON p.id = e.player_id
+        LEFT JOIN player p ON p.id = e.player_id
         WHERE e.tournament_id = ?
         ORDER BY
           CASE WHEN e.waitlist_position IS NULL THEN 0 ELSE 1 END,

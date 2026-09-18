@@ -42,7 +42,8 @@ a:hover {
 button,
 .button-link,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -69,11 +70,27 @@ button.tiny {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid var(--line-strong);
   background: white;
   padding: 0.7rem 0.8rem;
+}
+
+textarea {
+  resize: vertical;
+}
+
+[data-team-assignment] input[type="checkbox"] {
+  width: auto;
+}
+
+[data-team-registration] input,
+[data-team-registration] textarea,
+[data-team-assignment] input,
+[data-team-assignment] select {
+  min-width: 0;
 }
 
 .wrap {

@@ -80,3 +80,11 @@ To keep those emails out of spam, your sending domain should have valid `SPF`, `
 - historical tournament import from the original Vega/manual source files
 - public player history pages and leaderboard export
 - local port of the ETH Chess rating engine and tournament export CSVs
+
+## Tournament Formats
+
+When creating a tournament, or under **Tournament settings**, enable **Exclude from ratings and rating-based prizes** for an unrated event. Standings and results remain available, but the event does not contribute to player ratings, rated game histories, performance ratings, or rating-based prizes. Changing this setting on a completed local tournament rebuilds the ratings.
+
+**Team tournament (unrated)** lets entrants register a team name and member email addresses, or register alone with their name and email. Teams compete as single entries with the usual round, pairing, and result controls. Team sizes are flexible, with at least two members. The registration limit counts teams; solo registrations await assignment and do not occupy a team slot yet.
+
+Admins select solo registrations under **Awaiting team** and assign them to a new named team or an existing team that has not been paired. Member emails and registration answers are visible only to admins. Team format can only be changed before registrations or pairings exist. Existing databases are migrated automatically at startup.

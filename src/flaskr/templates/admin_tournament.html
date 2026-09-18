@@ -12,7 +12,7 @@
       <a class="button-link secondary" href="{{ url_for('web.export_tournament', slug=tournament.slug) }}">CSV export</a>
     </div>
   </div>
-  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds · {{ tournament.status }}{% if not tournament.is_public %} · private draft{% elif tournament.is_active_public %} · public now{% else %} · public archive{% endif %}</p>
+  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds · {{ tournament.status }}{% if tournament.is_team %} · Teams{% endif %}{% if tournament.excludes_rating %} · Unrated{% endif %}{% if not tournament.is_public %} · private draft{% elif tournament.is_active_public %} · public now{% else %} · public archive{% endif %}</p>
   <div class="inline-actions">
     <form method="post" action="{{ url_for('web.admin_activate_tournament', slug=tournament.slug) }}" data-preserve-open-round>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -20,15 +20,19 @@
       <button type="submit">{{ "Remove from public homepage" if tournament.is_active_public else "Show on public homepage" }}</button>
     </form>
     {% if not tournament.is_historical %}
-      <button type="button" class="secondary" data-open-modal="registration-settings">Registration settings</button>
-      <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}" data-confirm="Finish this tournament and update the leaderboard?" data-preserve-open-round>
+      <button type="button" class="secondary" data-open-modal="registration-settings">Tournament settings</button>
+      <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}" data-confirm="{{ 'Finish this unrated tournament?' if tournament.excludes_rating else 'Finish this tournament and update the leaderboard?' }}" data-preserve-open-round>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="open_round" value="">
-        <button type="submit" class="secondary">{{ "Finished" if tournament.status == "completed" else "Finish tournament and update leaderboard" }}</button>
+        <button type="submit" class="secondary">{{ "Finished" if tournament.status == "completed" else ("Finish tournament" if tournament.excludes_rating else "Finish tournament and update leaderboard") }}</button>
       </form>
     {% endif %}
   </div>
 </section>
+
+{% if tournament.is_team %}
+  {% include "_admin_teams.html" %}
+{% endif %}
 
 {% if secondary_prize_rankings["performances"] or secondary_prize_rankings["games"] %}
   <section class="section">
@@ -284,7 +288,7 @@
 
 <section class="section">
   <div class="section-heading">
-    <h2>Players</h2>
+    <h2>{{ "Teams" if tournament.is_team else "Players" }}</h2>
   </div>
   <div class="table-wrap">
     <table>
@@ -292,11 +296,11 @@
         <tr>
           <th>
             <span class="sortable-header">
-              <span>Player</span>
+              <span>{{ "Team" if tournament.is_team else "Player" }}</span>
               <button type="button" class="sort-toggle" data-player-sort title="Click to sort by player name. Double-click to reset.">↕</button>
             </span>
           </th>
-          <th>Member</th>
+          {% if not tournament.is_team %}<th>Member</th>{% endif %}
           <th>Status</th>
           <th>
             <span class="sortable-header">
@@ -331,7 +335,7 @@
                 <small class="waitlist-note">Waiting list #{{ entry.waitlist_position }}</small>
               {% endif %}
             </td>
-            <td>{{ "✅" if entry.member_status == "member" else "❌" }}</td>
+            {% if not tournament.is_team %}<td>{{ "✅" if entry.member_status == "member" else "❌" }}</td>{% endif %}
             <td>
               {% if tournament.is_historical %}
                 <span class="status-pill {{ 'status-waitlist' if entry.waitlist_position else ('status-on' if entry.is_active else 'status-off') }}">
@@ -379,8 +383,12 @@
   </div>
 
   {% if not tournament.is_historical %}
-    <form method="post" action="{{ url_for('web.add_entry', slug=tournament.slug) }}" class="stack-form centered-form add-player-form" data-player-search>
+    <form method="post" action="{{ url_for('web.add_entry', slug=tournament.slug) }}" class="stack-form centered-form add-player-form" {{ 'data-team-registration' if tournament.is_team else 'data-player-search' }}>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {% if tournament.is_team %}
+        <h3>Add registration</h3>
+        {% include "_team_registration_fields.html" %}
+      {% else %}
       <h3>Add player</h3>
       <label class="autocomplete-field">
         Name
@@ -395,6 +403,7 @@
         Rating (optional)
         <input type="number" name="declared_rating" min="0" max="4000" data-player-rating>
       </label>
+      {% endif %}
       {% for field in registration_fields %}
         <label>
           {{ field.label }}
@@ -410,23 +419,23 @@
           {% endif %}
         </label>
       {% endfor %}
-      <button type="submit">Add player</button>
+      <button type="submit">{{ "Add registration" if tournament.is_team else "Add player" }}</button>
     </form>
   {% endif %}
 
   {% if registration_fields %}
     <div class="player-information-block">
       <div class="section-heading">
-        <h3>Player information</h3>
+        <h3>{{ "Team information" if tournament.is_team else "Player information" }}</h3>
         <small>Registration details and current score</small>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Player</th>
+              <th>{{ "Team" if tournament.is_team else "Player" }}</th>
               <th>Email</th>
-              <th>Rating</th>
+              {% if not tournament.is_team %}<th>Rating</th>{% endif %}
               <th>Score</th>
               {% for field in registration_fields %}
                 <th>{{ field.label }}</th>
@@ -439,7 +448,7 @@
               <tr>
                 <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=entry.id) }}">{{ entry.imported_name }}</a></td>
                 <td>{{ entry.imported_email or entry.player_email or "—" }}</td>
-                <td>{{ row.rating }}</td>
+                {% if not tournament.is_team %}<td>{{ row.rating }}</td>{% endif %}
                 <td data-player-info-score="{{ entry.id }}">{{ "%.1f"|format(row.score) }}</td>
                 {% for value in row.field_values %}
                   <td>{{ value or "—" }}</td>
@@ -447,7 +456,7 @@
               </tr>
             {% else %}
               <tr>
-                <td colspan="{{ 4 + registration_fields|length }}">No players yet.</td>
+                <td colspan="{{ (3 if tournament.is_team else 4) + registration_fields|length }}">No {{ "teams" if tournament.is_team else "players" }} yet.</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -487,9 +496,25 @@
   <div class="modal-backdrop" hidden data-modal="registration-settings">
     <div class="modal-card modal-wide">
       <div class="section-heading">
-        <h2>Registration settings</h2>
+        <h2>Tournament settings</h2>
         <button type="button" class="secondary tiny" data-close-modal="registration-settings">Close</button>
       </div>
+      <form method="post" action="{{ url_for('web.update_tournament_settings', slug=tournament.slug) }}" class="stack-form modal-form" data-tournament-format>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label class="checkbox-row">
+          <input type="checkbox" name="excludes_rating" value="1" {% if tournament.excludes_rating %}checked{% endif %}>
+          <span>Exclude from ratings and rating-based prizes</span>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="is_team" value="1" {% if tournament.is_team %}checked{% endif %} {% if entries or team_members or latest_round or tournament.status == 'completed' %}disabled{% endif %}>
+          <span>Team tournament (unrated)</span>
+        </label>
+        {% if tournament.is_team and (entries or team_members or latest_round or tournament.status == 'completed') %}
+          <input type="hidden" name="is_team" value="1">
+        {% endif %}
+        <button type="submit">Save tournament settings</button>
+      </form>
+      <h3>Registration settings</h3>
       <p class="lede">
         {{ "Visible on the registration page" if tournament.registration_enabled and tournament.registration_opens_at else "Hidden from the registration page" }}
         {% if tournament.registration_opens_at %}
@@ -529,7 +554,7 @@
           >
         </label>
         <label>
-          Maximum registrations
+          {{ "Maximum teams" if tournament.is_team else "Maximum registrations" }}
           <input type="number" name="max_registrations" min="1" value="{{ tournament.max_registrations or '' }}">
         </label>
         <section class="custom-fields-editor">
@@ -608,4 +633,5 @@
 
 {% block scripts %}
   <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='team_registration.js') }}" defer></script>
 {% endblock %}

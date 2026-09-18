@@ -24,7 +24,7 @@
   <div class="section-heading">
     <h2>Create tournament</h2>
   </div>
-  <form method="post" action="{{ url_for('web.create_tournament') }}" enctype="multipart/form-data" class="stack-form section-narrow-form">
+  <form method="post" action="{{ url_for('web.create_tournament') }}" enctype="multipart/form-data" class="stack-form section-narrow-form" data-tournament-format>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>
       Name
@@ -38,8 +38,16 @@
       Rounds
       <input type="number" name="rounds_planned" min="1" max="15" value="7" required>
     </label>
+    <label class="checkbox-row">
+      <input type="checkbox" name="excludes_rating" value="1">
+      <span>Exclude from ratings and rating-based prizes</span>
+    </label>
+    <label class="checkbox-row">
+      <input type="checkbox" name="is_team" value="1">
+      <span>Team tournament (unrated)</span>
+    </label>
     <label>
-      Registration CSV
+      Registration CSV (individual tournaments)
       <input type="file" name="registrations" accept=".csv">
     </label>
     <button type="submit">Create tournament</button>
@@ -167,4 +175,5 @@
 
 {% block scripts %}
   <script src="{{ url_for('static', filename='admin.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='team_registration.js') }}" defer></script>
 {% endblock %}

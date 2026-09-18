@@ -1,0 +1,68 @@
+<section class="section">
+  {% set unassigned = team_members|selectattr('entry_id', 'none')|list %}
+  <div class="section-heading">
+    <h2>Awaiting team</h2>
+    <span>{{ unassigned|length }} solo registrations</span>
+  </div>
+  {% if unassigned %}
+    <form method="post" action="{{ url_for('web.assign_team', slug=tournament.slug) }}" class="stack-form" data-team-assignment>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Registration details</th></tr></thead>
+          <tbody>
+            {% for member in unassigned %}
+              <tr>
+                <td><input type="checkbox" name="member_id" value="{{ member.id }}" aria-label="Select {{ member.name }}" {% if tournament.status == 'completed' %}disabled{% endif %}></td>
+                <td>{{ member.name }}</td>
+                <td>{{ member.email }}</td>
+                <td>{% for answer in team_member_answers.get(member.id, []) %}<div>{{ answer.label }}: {{ answer.value }}</div>{% endfor %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if tournament.status != 'completed' %}
+        <div class="stack-form section-narrow-form">
+          <label>
+            Team
+            <select name="existing_entry_id">
+              <option value="">New team</option>
+              {% for entry in entries %}
+                <option value="{{ entry.id }}">{{ entry.imported_name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Team name<input type="text" name="team_name" required></label>
+          <button type="submit">Assign selected members</button>
+        </div>
+      {% endif %}
+    </form>
+  {% else %}
+    <p class="muted">No solo registrations awaiting a team.</p>
+  {% endif %}
+</section>
+{% if entries %}
+  <section class="section">
+    <h2>Team members</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Team</th><th>Members</th></tr></thead>
+        <tbody>
+          {% for entry in entries %}
+            <tr>
+              <td>
+                <form method="post" action="{{ url_for('web.rename_team', slug=tournament.slug, entry_id=entry.id) }}" class="inline-actions">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="text" name="team_name" value="{{ entry.imported_name }}" aria-label="Name for {{ entry.imported_name }}" required>
+                  <button type="submit" class="secondary tiny">Rename</button>
+                </form>
+              </td>
+              <td>{% for member in team_members if member.entry_id == entry.id %}<div>{{ member.name or '' }}{% if member.name %} &lt;{% endif %}{{ member.email }}{% if member.name %}&gt;{% endif %}</div>{% endfor %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endif %}
