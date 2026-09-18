@@ -9,13 +9,14 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Registration details</th></tr></thead>
+          <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Approximate Elo</th><th>Registration details</th></tr></thead>
           <tbody>
             {% for member in unassigned %}
               <tr>
                 <td><input type="checkbox" name="member_id" value="{{ member.id }}" aria-label="Select {{ member.name }}" {% if tournament.status == 'completed' %}disabled{% endif %}></td>
                 <td>{{ member.name }}</td>
                 <td>{{ member.email }}</td>
+                <td>{{ member.declared_rating if member.declared_rating is not none else '-' }}</td>
                 <td>{% for answer in team_member_answers.get(member.id, []) %}<div>{{ answer.label }}: {{ answer.value }}</div>{% endfor %}</td>
               </tr>
             {% endfor %}
@@ -29,7 +30,10 @@
             <select name="existing_entry_id">
               <option value="">New team</option>
               {% for entry in entries %}
-                <option value="{{ entry.id }}">{{ entry.imported_name }}</option>
+                {% set member_count = team_members|selectattr('entry_id', 'equalto', entry.id)|list|length %}
+                {% if member_count < tournament.team_size %}
+                  <option value="{{ entry.id }}">{{ entry.imported_name }} ({{ member_count }}/{{ tournament.team_size }})</option>
+                {% endif %}
               {% endfor %}
             </select>
           </label>
@@ -47,7 +51,7 @@
     <h2>Team members</h2>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Team</th><th>Members</th></tr></thead>
+        <thead><tr><th>Team</th><th>Members</th><th>Average Elo</th></tr></thead>
         <tbody>
           {% for entry in entries %}
             <tr>
@@ -59,6 +63,7 @@
                 </form>
               </td>
               <td>{% for member in team_members if member.entry_id == entry.id %}<div>{{ member.name or '' }}{% if member.name %} &lt;{% endif %}{{ member.email }}{% if member.name %}&gt;{% endif %}</div>{% endfor %}</td>
+              <td>{{ entry.declared_rating if entry.declared_rating is not none else '-' }}</td>
             </tr>
           {% endfor %}
         </tbody>

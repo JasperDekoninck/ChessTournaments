@@ -16,9 +16,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-tournament-format]").forEach((form) => {
     const team = form.querySelector('[name="is_team"]');
     const excluded = form.querySelector('[name="excludes_rating"]');
+    const size = form.querySelector('[data-team-size]');
     const update = () => {
       if (team.checked) excluded.checked = true;
       excluded.disabled = team.checked;
+      size.hidden = !team.checked;
+      size.querySelector("input").disabled = !team.checked;
     };
     team.addEventListener("change", update);
     update();

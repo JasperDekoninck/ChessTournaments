@@ -11,8 +11,12 @@
     <input type="text" name="team_name" required>
   </label>
   <label>
-    Member email addresses
+    Member email addresses ({{ tournament.team_size }} members)
     <textarea name="member_emails" rows="3" placeholder="alex@example.com, sam@example.com" required></textarea>
+  </label>
+  <label>
+    Average Elo
+    <input type="number" name="average_elo" min="0" max="4000" step="1" required>
   </label>
 </div>
 <div class="stack-form" data-solo-fields hidden>
@@ -23,5 +27,9 @@
   <label>
     Your email
     <input type="email" name="email" autocomplete="email" required disabled>
+  </label>
+  <label>
+    Approximate Elo (optional)
+    <input type="number" name="approximate_elo" min="0" max="4000" step="1" disabled>
   </label>
 </div>

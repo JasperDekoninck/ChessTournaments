@@ -2,7 +2,7 @@
 {% block title %}{{ entry.imported_name }}{% endblock %}
 {% block content %}
 <section class="section">
-  <p class="kicker">{{ "Team Results" if tournament.is_team else "Player History" }}</p>
+  <p class="kicker">{{ "Team results" if tournament.is_team else "Player history" }}</p>
   <h1>{{ entry.imported_name }}</h1>
   {% if tournament.is_team %}
     <p class="lede"><a href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">{{ tournament.name }}</a></p>

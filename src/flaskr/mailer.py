@@ -9,8 +9,7 @@ from flask import current_app, url_for
 
 
 MEMBERSHIP_NOTE = """
-If you are not yet an ETH Chess member for the current academic year, you can become one at the start of the tournament for CHF 5.
-We accept cash, TWINT, and bank transfers. Your membership is valid for the entire academic year.
+Membership is free this year, you will not have to pay to participate in the tournament.
 """
 
 PUNCTUALITY_NOTE = "Please arrive on time so we can begin the tournament and publish pairings without delay. If you can't make it, please let us know so we can give your spot to the next person in the waiting list."
@@ -103,12 +102,15 @@ def send_email(recipient: str, subject: str, body: str) -> tuple[bool, str | Non
     return _deliver_message(message)
 
 
-def registration_email_body(tournament, player_name: str, waitlist_position: int | None) -> str:
+def registration_email_body(tournament, player_name: str, waitlist_position: int | None, *, solo: bool = False) -> str:
     status_line = (
         f"You are currently on the waiting list in position {waitlist_position}."
         if waitlist_position is not None
         else "Your registration is confirmed."
     )
+    if solo and waitlist_position is None:
+        teammates = "another player" if tournament["team_size"] == 2 else "other players"
+        status_line += f"\nYou will be paired with {teammates} at the tournament."
     lines = [
         f"Hello {player_name},",
         "",
@@ -143,9 +145,9 @@ def waitlist_confirmation_email_body(tournament, player_name: str) -> str:
     return "\n".join(lines)
 
 
-def send_registration_email(tournament, entry: dict[str, Any], waitlist_position: int | None) -> tuple[bool, str | None]:
+def send_registration_email(tournament, entry: dict[str, Any], waitlist_position: int | None, *, solo: bool = False) -> tuple[bool, str | None]:
     recipient = entry.get("email") or entry.get("imported_email")
-    body = registration_email_body(tournament, entry["name"], waitlist_position)
+    body = registration_email_body(tournament, entry["name"], waitlist_position, solo=solo)
     subject = (
         f"Waiting List for {tournament['name']}"
         if waitlist_position is not None

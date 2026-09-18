@@ -1,43 +1,47 @@
 {% extends "base.html" %}
+{% from "_ui.html" import icon %}
 {% block title %}{{ tournament.name }}{% endblock %}
 {% block content %}
-<section class="section">
-  <p class="kicker">{% if show_as_home %}Current Tournament{% elif tournament.is_historical %}Past Tournament{% else %}Tournament{% endif %}</p>
+<section class="section event-heading">
+  <div class="event-heading-top">
+    <p class="kicker">{% if show_as_home %}Current tournament{% elif tournament.is_historical %}Past tournament{% else %}Tournament{% endif %}</p>
+    <span class="event-badge {{ 'badge-success' if tournament.status != 'completed' and latest_round else '' }}">{{ 'Completed' if tournament.status == 'completed' else ('In progress' if latest_round else 'Awaiting pairings') }}</span>
+  </div>
   <h1>{{ tournament.name }}</h1>
-  <p class="lede">
-    {{ tournament.event_date }}
-    {% if tournament.event_time %} · {{ tournament.event_time }}{% endif %}
-    {% if tournament.venue %} · {{ tournament.venue }}{% endif %}
-    · {{ tournament.rounds_planned }} rounds
-    {% if tournament.is_team %} · Teams{% endif %}
-    {% if tournament.excludes_rating %} · Unrated{% endif %}
-  </p>
+  <div class="event-details event-details-inline">
+    <span>{{ icon('calendar-days') }} {{ tournament.event_date }}</span>
+    {% if tournament.event_time %}<span>{{ icon('clock-3') }} {{ tournament.event_time }}</span>{% endif %}
+    {% if tournament.venue %}<span>{{ icon('map-pin') }} {{ tournament.venue }}</span>{% endif %}
+    <span>{{ icon('trophy') }} {{ tournament.rounds_planned }} rounds</span>
+    {% if tournament.is_team %}<span>{{ icon('users') }} Teams of {{ tournament.team_size }}</span>{% endif %}
+    {% if tournament.excludes_rating %}<span class="event-badge">Unrated</span>{% endif %}
+  </div>
 </section>
 
 {% if tournament.status == "completed" and podium %}
   <section class="section">
     <div class="section-heading">
-      <h2>Final Highlights</h2>
+      <h2>Final highlights</h2>
     </div>
     <div class="podium-stage">
       {% if podium|length >= 2 %}
         {% set second = podium[1] %}
         <article class="podium-slot podium-slot-second">
-          <small>2nd</small>
+          <small>2nd place</small>
           <strong><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=second.entry_id) }}">{{ second.name }}</a></strong>
           <span>{{ "%.1f"|format(second.score) }}</span>
         </article>
       {% endif %}
       {% set first = podium[0] %}
       <article class="podium-slot podium-slot-first">
-        <small>1st</small>
+        <small>{{ icon('trophy') }} 1st place</small>
         <strong><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=first.entry_id) }}">{{ first.name }}</a></strong>
         <span>{{ "%.1f"|format(first.score) }}</span>
       </article>
       {% if podium|length >= 3 %}
         {% set third = podium[2] %}
         <article class="podium-slot podium-slot-third">
-          <small>3rd</small>
+          <small>3rd place</small>
           <strong><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=third.entry_id) }}">{{ third.name }}</a></strong>
           <span>{{ "%.1f"|format(third.score) }}</span>
         </article>
@@ -47,7 +51,7 @@
       <div class="highlight-grid">
         {% if tournament_insights.above_level %}
           <article class="highlight-card">
-            <small>Played Above Level</small>
+            <small>Played above level</small>
             <strong>{{ tournament_insights.above_level.name }}</strong>
             <span>
               Performance {{ tournament_insights.above_level.performance_rating }}
@@ -58,7 +62,7 @@
         {% endif %}
         {% if tournament_insights.biggest_upset %}
           <article class="highlight-card">
-            <small>Most Unlikely Win</small>
+            <small>Most unlikely win</small>
             <strong>{{ tournament_insights.biggest_upset.winner }}</strong>
             <span>beat {{ tournament_insights.biggest_upset.loser }} ({{ tournament_insights.biggest_upset.result }})</span>
             <span>{{ "%.1f"|format(tournament_insights.biggest_upset.win_probability * 100) }}% win prob</span>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ui.html" import icon %}
 {% block title %}Leaderboard{% endblock %}
 {% block content %}
 <section class="section">
@@ -7,24 +8,25 @@
 
 <section class="section">
   <div class="section-heading">
-    <h2>Players</h2>
+    <h2>{{ icon('trophy') }} Players</h2>
+    <span>{{ leaderboard|length }} ranked players</span>
   </div>
   <div class="table-wrap">
-    <table class="compact-table">
+    <table class="compact-table leaderboard-table">
       <thead>
         <tr>
           <th>Rank</th>
           <th>Name</th>
           <th>Rating</th>
-          <th>W</th>
-          <th>L</th>
-          <th>D</th>
+          <th>Wins</th>
+          <th>Losses</th>
+          <th>Draws</th>
         </tr>
       </thead>
       <tbody>
         {% for row in leaderboard %}
           <tr>
-            <td>{{ row.Rank }}</td>
+            <td><span class="rank-number {{ 'rank-podium' if row.Rank|int <= 3 else '' }}">{{ row.Rank }}</span></td>
             <td>
               {% if row.Name != "Anonymous" %}
                 <a href="{{ url_for('web.leaderboard_player', player_name=row.Name) }}">{{ row.Name }}</a>
@@ -32,7 +34,7 @@
                 {{ row.Name }}
               {% endif %}
             </td>
-            <td>{{ row.Rating }}</td>
+            <td class="score-value">{{ row.Rating }}</td>
             <td>{{ row.Wins }}</td>
             <td>{{ row.Losses }}</td>
             <td>{{ row.Draws }}</td>

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS tournament (
   rounds_planned INTEGER NOT NULL,
   excludes_rating INTEGER NOT NULL DEFAULT 0,
   is_team INTEGER NOT NULL DEFAULT 0,
+  team_size INTEGER NOT NULL DEFAULT 2,
   status TEXT NOT NULL DEFAULT 'draft',
   registration_csv_name TEXT,
   registration_enabled INTEGER NOT NULL DEFAULT 0,
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS team_member (
   entry_id INTEGER REFERENCES tournament_entry(id) ON DELETE CASCADE,
   name TEXT,
   email TEXT NOT NULL COLLATE NOCASE,
+  declared_rating INTEGER,
   registration_answers_json TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (tournament_id, email)

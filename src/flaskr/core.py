@@ -169,7 +169,7 @@ def fetch_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
         FROM tournament
         ORDER BY is_active_public DESC, event_date DESC, id DESC
         """
@@ -183,7 +183,7 @@ def fetch_public_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
         FROM tournament
         WHERE is_public = 1
         ORDER BY is_active_public DESC, event_date DESC, id DESC
@@ -198,7 +198,7 @@ def fetch_active_tournament(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
         FROM tournament
         WHERE is_active_public = 1
         ORDER BY event_date DESC, id DESC
@@ -214,7 +214,7 @@ def fetch_tournament_by_slug(db, slug: str):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
         FROM tournament
         WHERE slug = ?
         """,
@@ -250,7 +250,7 @@ def fetch_open_registration_tournaments(db, current_time: datetime | None = None
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
-          is_historical, is_public, is_active_public, excludes_rating, is_team
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
         FROM tournament
         WHERE is_historical = 0 AND status != 'completed' AND registration_enabled = 1 AND registration_opens_at IS NOT NULL
         ORDER BY event_date ASC, id ASC
@@ -259,7 +259,7 @@ def fetch_open_registration_tournaments(db, current_time: datetime | None = None
     return [tournament for tournament in tournaments if registration_open_for_tournament(tournament, current_time)]
 
 
-def registration_counts(db, tournament_id: int) -> dict[str, int]:
+def registration_counts(db, tournament_id: int) -> dict[str, int | float]:
     rows = db.execute(
         """
         SELECT
@@ -270,8 +270,19 @@ def registration_counts(db, tournament_id: int) -> dict[str, int]:
         """,
         (tournament_id,),
     ).fetchone()
+    confirmed_count = int(rows["confirmed_count"] or 0)
+    tournament = db.execute("SELECT is_team, team_size FROM tournament WHERE id = ?", (tournament_id,)).fetchone()
+    if tournament and tournament["is_team"]:
+        solo_count = db.execute(
+            "SELECT COUNT(*) FROM team_member WHERE tournament_id = ? AND entry_id IS NULL",
+            (tournament_id,),
+        ).fetchone()[0]
+        whole_teams, remaining_members = divmod(solo_count, tournament["team_size"])
+        confirmed_count += whole_teams
+        if remaining_members:
+            confirmed_count += remaining_members / tournament["team_size"]
     return {
-        "confirmed_count": int(rows["confirmed_count"] or 0),
+        "confirmed_count": confirmed_count,
         "waitlist_count": int(rows["waitlist_count"] or 0),
     }
 

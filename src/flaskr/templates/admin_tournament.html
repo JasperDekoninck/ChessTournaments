@@ -1,26 +1,35 @@
 {% extends "base.html" %}
+{% from "_ui.html" import icon %}
 {% block title %}{{ tournament.name }} · Admin{% endblock %}
 {% block content %}
-<section class="section">
+<section class="section admin-event-heading">
+  <a class="back-link" href="{{ url_for('web.admin', tab='tournaments') }}">{{ icon('archive') }} All tournaments</a>
   <div class="section-heading">
     <div>
-      <p class="kicker">Tournament Admin</p>
+      <p class="kicker">Tournament admin</p>
       <h1>{{ tournament.name }}</h1>
     </div>
     <div class="inline-actions">
-      <a class="button-link secondary" href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">{{ "Preview public page" if not tournament.is_public else "Public view" }}</a>
-      <a class="button-link secondary" href="{{ url_for('web.export_tournament', slug=tournament.slug) }}">CSV export</a>
+      <a class="button-link secondary" href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">{{ icon('external-link') }} {{ "Preview public page" if not tournament.is_public else "Public view" }}</a>
+      <a class="button-link secondary" href="{{ url_for('web.export_tournament', slug=tournament.slug) }}">{{ icon('download') }} CSV export</a>
     </div>
   </div>
-  <p class="lede">{{ tournament.event_date }} · {{ tournament.rounds_planned }} rounds · {{ tournament.status }}{% if tournament.is_team %} · Teams{% endif %}{% if tournament.excludes_rating %} · Unrated{% endif %}{% if not tournament.is_public %} · private draft{% elif tournament.is_active_public %} · public now{% else %} · public archive{% endif %}</p>
-  <div class="inline-actions">
+  <div class="event-details event-details-inline">
+    <span>{{ icon('calendar-days') }} {{ tournament.event_date }}</span>
+    <span>{{ icon('trophy') }} {{ tournament.rounds_planned }} rounds</span>
+    {% if tournament.is_team %}<span>{{ icon('users') }} Teams of {{ tournament.team_size }}</span>{% endif %}
+    <span class="event-badge">{{ tournament.status }}</span>
+    {% if tournament.excludes_rating %}<span class="event-badge">Unrated</span>{% endif %}
+    <span class="event-badge {{ 'badge-success' if tournament.is_active_public else '' }}">{% if not tournament.is_public %}Private draft{% elif tournament.is_active_public %}Public now{% else %}Public archive{% endif %}</span>
+  </div>
+  <div class="inline-actions event-actions">
     <form method="post" action="{{ url_for('web.admin_activate_tournament', slug=tournament.slug) }}" data-preserve-open-round>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="open_round" value="">
       <button type="submit">{{ "Remove from public homepage" if tournament.is_active_public else "Show on public homepage" }}</button>
     </form>
     {% if not tournament.is_historical %}
-      <button type="button" class="secondary" data-open-modal="registration-settings">Tournament settings</button>
+      <button type="button" class="secondary" data-open-modal="registration-settings">{{ icon('settings-2') }} Tournament settings</button>
       <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}" data-confirm="{{ 'Finish this unrated tournament?' if tournament.excludes_rating else 'Finish this tournament and update the leaderboard?' }}" data-preserve-open-round>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="open_round" value="">
@@ -38,13 +47,13 @@
   <section class="section">
     <div class="section-heading">
       <div>
-        <h2>Secondary Prizes</h2>
+        <h2>Secondary prizes</h2>
         <p class="lede">Admin-only top 10 ranking for the surprising performance and game prizes.</p>
       </div>
     </div>
     <div class="grid two-col">
       <div>
-        <h3>Most Surprising Performance</h3>
+        <h3>Most surprising performance</h3>
         <div class="table-wrap">
           <table>
             <thead>
@@ -75,7 +84,7 @@
         </div>
       </div>
       <div>
-        <h3>Most Surprising Game</h3>
+        <h3>Most surprising game</h3>
         <div class="table-wrap">
           <table>
             <thead>
@@ -145,7 +154,7 @@
                 <button type="submit" class="secondary">Generate pairings</button>
               </form>
               {% if panel.round_no == editable_round %}
-                <button type="button" class="secondary tiny" data-add-board>+ Add board</button>
+                <button type="button" class="secondary tiny" data-add-board>{{ icon('plus') }} Add board</button>
               {% endif %}
             </div>
           {% endif %}
@@ -497,7 +506,7 @@
     <div class="modal-card modal-wide">
       <div class="section-heading">
         <h2>Tournament settings</h2>
-        <button type="button" class="secondary tiny" data-close-modal="registration-settings">Close</button>
+        <button type="button" class="secondary icon-button" data-close-modal="registration-settings" aria-label="Close tournament settings" title="Close tournament settings">{{ icon('x') }}</button>
       </div>
       <form method="post" action="{{ url_for('web.update_tournament_settings', slug=tournament.slug) }}" class="stack-form modal-form" data-tournament-format>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -512,6 +521,10 @@
         {% if tournament.is_team and (entries or team_members or latest_round or tournament.status == 'completed') %}
           <input type="hidden" name="is_team" value="1">
         {% endif %}
+        <label data-team-size {% if not tournament.is_team %}hidden{% endif %}>
+          Number of team members
+          <input type="number" name="team_size" min="2" max="100" step="1" value="{{ tournament.team_size }}" required {% if not tournament.is_team %}disabled{% endif %}>
+        </label>
         <button type="submit">Save tournament settings</button>
       </form>
       <h3>Registration settings</h3>
@@ -526,7 +539,7 @@
         {% if tournament.venue %}
           · {{ tournament.venue }}
         {% endif %}
-        · {{ registration_summary.confirmed_count }} confirmed
+        · {{ registration_summary.confirmed_count|round(2) }} {{ "teams confirmed" if tournament.is_team else "confirmed" }}
         {% if tournament.max_registrations %}
           / {{ tournament.max_registrations }} max
         {% endif %}

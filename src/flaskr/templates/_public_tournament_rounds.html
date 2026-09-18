@@ -1,5 +1,5 @@
 <section class="section">
-  <nav class="tab-row">
+  <nav class="tab-row view-tabs" aria-label="Tournament view">
     {% if selected_round %}
       <a class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='boards') }}">Rounds</a>
       <a class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='standings') }}">Standings</a>
@@ -17,7 +17,7 @@
       {% endif %}
     </div>
     {% if round_numbers %}
-      <nav class="tab-row">
+      <nav class="tab-row round-tabs" aria-label="Rounds">
         {% for round_no in round_numbers %}
           <a class="{% if round_no == selected_round %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=round_no, view='boards') }}">Round {{ round_no }}</a>
         {% endfor %}
@@ -39,7 +39,7 @@
           <tbody>
             {% for pairing in pairings %}
               <tr>
-                <td>{{ pairing.board_no }}</td>
+                <td class="board-number">{{ pairing.board_no }}</td>
                 <td class="public-player-col public-player-col-white">
                   {% if pairing.white_entry_id %}
                     <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.white_entry_id) }}">{{ pairing.white_name }}</a>
@@ -54,7 +54,7 @@
                     -
                   {% endif %}
                 </td>
-                <td class="align-center public-result-col">{{ pairing.result_code or "Pending" }}</td>
+                <td class="align-center public-result-col"><span class="result-label {{ 'result-pending' if not pairing.result_code else '' }}">{{ pairing.result_code or "Pending" }}</span></td>
                 <td class="align-center public-score-col">
                   {% if pairing.black_entry_id and pairing.black_score is not none %}
                     {{ "%.1f"|format(pairing.black_score) }}
@@ -99,13 +99,13 @@
         <tbody>
           {% for row in standings %}
             <tr>
-              <td>{{ row.rank }}</td>
+              <td><span class="rank-number {{ 'rank-podium' if row.rank <= 3 else '' }}">{{ row.rank }}</span></td>
               <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=row.entry_id) }}">{{ row.name }}</a></td>
               {% if not tournament.is_team %}<td>{{ row.display_rating }}</td>{% endif %}
               {% if has_performance_ratings %}
                 <td>{{ row.performance_rating if row.performance_rating is not none else "-" }}</td>
               {% endif %}
-              <td>{{ "%.1f"|format(row.score) }}</td>
+              <td class="score-value">{{ "%.1f"|format(row.score) }}</td>
               <td>{{ "%.1f"|format(row.bh) }}</td>
               <td>{{ "%.1f"|format(row.bh_c1) }}</td>
             </tr>

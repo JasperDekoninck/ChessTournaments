@@ -7,6 +7,7 @@ import random
 import tempfile
 import unittest
 from io import BytesIO
+from html.parser import HTMLParser
 from pathlib import Path
 
 from flaskr import create_app
@@ -21,8 +22,19 @@ from flaskr.core import (
     replace_round_pairings,
 )
 from flaskr.db import _add_column_if_missing, _table_columns, get_db, init_db
+from flaskr.mailer import registration_email_body, waitlist_confirmation_email_body
 from flaskr.rating_integration import get_player_history, get_player_profile, import_rating_history, sync_member_statuses
 from rating import Manager, PlayerDatabase
+
+
+class ElementCollector(HTMLParser):
+    def __init__(self, html):
+        super().__init__()
+        self.elements = []
+        self.feed(html)
+
+    def handle_starttag(self, tag, attrs):
+        self.elements.append((tag, dict(attrs)))
 
 
 class TournamentAppTestCase(unittest.TestCase):
@@ -130,7 +142,7 @@ class TournamentAppTestCase(unittest.TestCase):
         slug = self._create_tournament()
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No public tournament is active yet", response.data)
+        self.assertIn(b"No tournament in progress", response.data)
         self.assertNotIn(b"<h2>Leaderboard</h2>", response.data)
 
         self._publish_tournament(slug)
@@ -547,6 +559,85 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"We store your data only for the purpose of registering for this tournament", response.data)
 
+    def test_registration_notices_say_membership_is_free(self):
+        tournament = {"name": "Free Tournament", "event_date": "2026-10-01", "event_time": None, "venue": None}
+        response = self.client.get("/register")
+        self.assertEqual(response.status_code, 200)
+        notices = {
+            "registration page": response.get_data(as_text=True),
+            "confirmed registration": registration_email_body(tournament, "Player", None),
+            "waitlisted registration": registration_email_body(tournament, "Player", 1),
+            "waitlist confirmation": waitlist_confirmation_email_body(tournament, "Player"),
+        }
+        for name, notice in notices.items():
+            with self.subTest(notice=name):
+                self.assertIn("Membership is free this year, you will not have to pay to participate in the tournament.", notice)
+                for old_wording in ("CHF 5", "5 CHF", "TWINT", "bank transfers", "payable at the start"):
+                    self.assertNotIn(old_wording, notice)
+
+    def test_shared_navigation_identifies_current_page_and_content_landmark(self):
+        for path in ("/", "/register", "/ratings"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b"<strong>Schwarzer K&ouml;nig</strong>", response.data)
+                elements = ElementCollector(response.get_data(as_text=True)).elements
+                current_links = [attrs for tag, attrs in elements if tag == "a" and attrs.get("aria-current") == "page"]
+                self.assertEqual([attrs["href"] for attrs in current_links], [path])
+                self.assertEqual([attrs.get("id") for tag, attrs in elements if tag == "main"], ["main-content"])
+                self.assertTrue(any(tag == "a" and attrs.get("href") == "#main-content" for tag, attrs in elements))
+        self._login()
+        response = self.client.get("/admin")
+        self.assertEqual(response.status_code, 200)
+        elements = ElementCollector(response.get_data(as_text=True)).elements
+        self.assertTrue(any(tag == "a" and attrs.get("href") == "/admin" and attrs.get("aria-current") == "page" for tag, attrs in elements))
+
+    def test_interface_assets_are_local_and_headings_are_not_forced_uppercase(self):
+        response = self.client.get("/static/style.css")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("text-transform: uppercase", response.get_data(as_text=True))
+        response.close()
+        for asset in ("fonts/manrope.ttf", "icons/trophy.svg", "icons/user-plus.svg", "icons/x.svg", "fonts/OFL.txt", "icons/LICENSE"):
+            with self.subTest(asset=asset):
+                response = self.client.get(f"/static/{asset}")
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.data)
+                response.close()
+
+    def test_icons_use_external_styles_compatible_with_content_security_policy(self):
+        stylesheet = Path(self.app.static_folder, "style.css").read_text(encoding="utf-8")
+        icon_template = self.app.jinja_env.get_template("_ui.html")
+        for asset in sorted(Path(self.app.static_folder, "icons").glob("*.svg")):
+            with self.subTest(icon=asset.stem):
+                elements = ElementCollector(str(icon_template.module.icon(asset.stem))).elements
+                self.assertEqual(len(elements), 1)
+                tag, attrs = elements[0]
+                self.assertEqual(tag, "span")
+                self.assertNotIn("style", attrs)
+                self.assertEqual(attrs["aria-hidden"], "true")
+                self.assertIn(f"ui-icon-{asset.stem}", attrs["class"].split())
+                self.assertIn(
+                    f'.ui-icon-{asset.stem} {{\n  --icon: url("icons/{asset.name}");\n}}',
+                    stylesheet,
+                )
+
+        slug = self._create_tournament(name="Icon Rendering Tournament")
+        for path in (f"/t/{slug}", "/register", "/ratings", "/admin", f"/admin/t/{slug}"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("style-src 'self';", response.headers["Content-Security-Policy"])
+                icons = [
+                    attrs for _, attrs in ElementCollector(response.get_data(as_text=True)).elements
+                    if "ui-icon" in attrs.get("class", "").split()
+                ]
+                self.assertTrue(icons)
+                for attrs in icons:
+                    self.assertNotIn("style", attrs)
+                    icon_classes = [name for name in attrs["class"].split() if name.startswith("ui-icon-")]
+                    self.assertEqual(len(icon_classes), 1)
+                    self.assertIn(f".{icon_classes[0]} {{", stylesheet)
+
     def test_create_tournament_and_generate_pairings(self):
         slug = self._create_tournament()
         self._set_all_entries_active(slug)
@@ -757,7 +848,8 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertNotIn(b"Current club ranking", response.data)
         self.assertNotIn(b'<p class="kicker">', response.data)
         self.assertNotIn(b"CSV", response.data)
-        self.assertIn(b'class="compact-table"', response.data)
+        elements = ElementCollector(response.get_data(as_text=True)).elements
+        self.assertTrue(any(tag == "table" and "compact-table" in attrs.get("class", "").split() for tag, attrs in elements))
 
         response = self.client.get("/leaderboard.csv")
         self.assertEqual(response.status_code, 404)
@@ -901,9 +993,9 @@ class TournamentAppTestCase(unittest.TestCase):
 
         response = self.client.get(f"/t/{slug}?view=standings")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Final Highlights", response.data)
-        self.assertIn(b"Played Above Level", response.data)
-        self.assertIn(b"Most Unlikely Win", response.data)
+        self.assertIn(b"Final highlights", response.data)
+        self.assertIn(b"Played above level", response.data)
+        self.assertIn(b"Most unlikely win", response.data)
         self.assertIn(b"1st", response.data)
         rating_index = response.data.index(b"<th>Rating</th>")
         performance_index = response.data.index(b"<th>Performance</th>")
@@ -1095,9 +1187,9 @@ class TournamentAppTestCase(unittest.TestCase):
 
         response = self.client.get(f"/admin/t/{slug}")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Secondary Prizes", response.data)
-        self.assertIn(b"Most Surprising Performance", response.data)
-        self.assertIn(b"Most Surprising Game", response.data)
+        self.assertIn(b"Secondary prizes", response.data)
+        self.assertIn(b"Most surprising performance", response.data)
+        self.assertIn(b"Most surprising game", response.data)
         self.assertIn(b"Performance Player 10", response.data)
         self.assertNotIn(b"Performance Player 11", response.data)
         self.assertIn(b"Game Winner 10", response.data)
@@ -1106,10 +1198,10 @@ class TournamentAppTestCase(unittest.TestCase):
         self._publish_tournament(slug)
         response = self.client.get(f"/t/{slug}?view=standings")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Final Highlights", response.data)
+        self.assertIn(b"Final highlights", response.data)
         self.assertIn(b"Performance Player 01", response.data)
         self.assertIn(b"Game Winner 01", response.data)
-        self.assertNotIn(b"Secondary Prizes", response.data)
+        self.assertNotIn(b"Secondary prizes", response.data)
         self.assertNotIn(b"Performance Player 02", response.data)
         self.assertNotIn(b"Game Winner 02", response.data)
 

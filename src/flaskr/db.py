@@ -97,6 +97,7 @@ def migrate_db(db):
     if tournament_columns:
         _add_column_if_missing(db, "tournament", "excludes_rating", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "tournament", "is_team", "INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing(db, "tournament", "team_size", "INTEGER NOT NULL DEFAULT 2")
         _add_column_if_missing(db, "tournament", "registration_enabled", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "tournament", "registration_opens_at", "TEXT")
         _add_column_if_missing(db, "tournament", "registration_form_json", "TEXT")
@@ -137,6 +138,9 @@ def migrate_db(db):
         _add_column_if_missing(db, "tournament_entry", "final_primary_tiebreak", "REAL")
         _add_column_if_missing(db, "tournament_entry", "final_secondary_tiebreak", "REAL")
         db.execute("CREATE INDEX IF NOT EXISTS idx_tournament_entry_player ON tournament_entry(player_id)")
+
+    if _table_columns(db, "team_member"):
+        _add_column_if_missing(db, "team_member", "declared_rating", "INTEGER")
 
     pairing_columns = _table_columns(db, "pairing")
     if pairing_columns:

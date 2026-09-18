@@ -1,30 +1,34 @@
 {% extends "base.html" %}
+{% from "_ui.html" import icon %}
 {% block title %}Register{% endblock %}
 {% block content %}
 <section class="section register-intro">
-  <p class="kicker">Registration</p>
-  <h1>Welcome to our registration page!</h1>
-  <p class="lede">We’re glad you want to join us. Open tournaments appear below, and after you register you will immediately see whether your place is confirmed or whether you are on the waiting list.</p>
-  <p class="lede">ETH Chess membership is valid for one academic year and costs 5 CHF, payable at the start of the tournament if you are not a member yet.</p>
+  <h1>Tournament registration</h1>
+  <p class="membership-notice">{{ icon('check') }} <span>Membership is free this year, you will not have to pay to participate in the tournament.</span></p>
 </section>
 
 {% for tournament in open_tournaments %}
   {% set counts = registration_counts[tournament.id] %}
+  {% set registration_full = tournament.max_registrations and counts.confirmed_count + 1 > tournament.max_registrations %}
   {% set registration_fields = registration_fields_by_tournament[tournament.id] %}
   <section class="section registration-panel" id="register-{{ tournament.slug }}">
-    <div class="section-heading">
-      <div>
+    <div class="registration-event">
+        <span class="event-badge {{ 'badge-warning' if registration_full else 'badge-success' }}">{{ 'Waiting list open' if registration_full else 'Registration open' }}</span>
         <h2>{{ tournament.name }}</h2>
-        <p class="lede">
-          {{ tournament.event_date }}
-          {% if tournament.event_time %} · {{ tournament.event_time }}{% endif %}
-          {% if tournament.venue %} · {{ tournament.venue }}{% endif %}
-        </p>
-        <p class="registration-meta">{{ counts.confirmed_count }}{% if tournament.max_registrations %}/{{ tournament.max_registrations }}{% endif %} {{ "teams confirmed" if tournament.is_team else "confirmed" }}{% if counts.waitlist_count %} · {{ counts.waitlist_count }} on the waiting list{% endif %}{% if tournament.excludes_rating %} · Unrated{% endif %}</p>
-      </div>
+        <div class="event-details">
+          <span>{{ icon('calendar-days') }} {{ tournament.event_date }}</span>
+          {% if tournament.event_time %}<span>{{ icon('clock-3') }} {{ tournament.event_time }}</span>{% endif %}
+          {% if tournament.venue %}<span>{{ icon('map-pin') }} {{ tournament.venue }}</span>{% endif %}
+          {% if tournament.is_team %}<span>{{ icon('users') }} Teams of {{ tournament.team_size }}</span>{% endif %}
+        </div>
+        <p class="registration-meta">{{ counts.confirmed_count|round(2) }}{% if tournament.max_registrations %}/{{ tournament.max_registrations }}{% endif %} {{ "teams confirmed" if tournament.is_team else "confirmed" }}{% if counts.waitlist_count %} · {{ counts.waitlist_count }} on the waiting list{% endif %}{% if tournament.excludes_rating %} · Unrated{% endif %}</p>
+        {% if tournament.max_registrations %}
+          <progress class="capacity-meter" value="{{ counts.confirmed_count }}" max="{{ tournament.max_registrations }}" aria-label="{{ tournament.name }} confirmed registrations"></progress>
+        {% endif %}
     </div>
-    {% if tournament.max_registrations and counts.confirmed_count >= tournament.max_registrations %}
-      <p class="flash flash-warning">This tournament is currently full. New registrations will be placed on the waiting list.</p>
+    <div class="registration-fields">
+    {% if registration_full %}
+      <p class="flash flash-warning">{% if tournament.is_team %}There is no room for another full team. New team registrations will be placed on the waiting list. You can still register alone and be paired at the tournament.{% else %}This tournament is currently full. New registrations will be placed on the waiting list.{% endif %}</p>
     {% endif %}
     <form method="post" action="{{ url_for('web.submit_registration', slug=tournament.slug) }}" class="stack-form registration-form" {{ 'data-team-registration' if tournament.is_team else 'data-register-search' }}>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -60,16 +64,17 @@
           {% endif %}
         </label>
       {% endfor %}
-      <button type="submit">Register</button>
+      <button type="submit">Register {{ icon('arrow-right') }}</button>
     </form>
     <p class="registration-note">
       We store your data only for the purpose of registering for this tournament, {% if tournament.is_team %}assigning teams, {% endif %}{% if not tournament.excludes_rating %}computing your Polyrating, {% endif %}showing your results, and determining your eligibility for certain prizes that will be handed out at the tournament. It will not be sent to any third party and it will not be used for any other purposes. By registering for this tournament, you agree that your data is used for this purpose.
     </p>
+    </div>
   </section>
 {% else %}
   <section class="section">
-    <h2>No tournament is open for registration right now.</h2>
-    <p class="lede">As soon as an admin opens registration for a tournament, it will appear on this page.</p>
+    <h2>No open registrations</h2>
+    <p class="lede">The next tournament will appear here when registration opens.</p>
   </section>
 {% endfor %}
 {% endblock %}

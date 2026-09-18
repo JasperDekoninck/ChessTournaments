@@ -1,10 +1,11 @@
 {% extends "base.html" %}
+{% from "_ui.html" import icon %}
 {% block title %}Current Tournament{% endblock %}
 {% block content %}
 <section class="section public-empty-hero">
-  <p class="kicker">Current Tournament</p>
-  <h1>No public tournament is active yet.</h1>
-  <p class="lede">Once an admin activates a tournament, this page will show the live boards and standings.</p>
+  <p class="kicker">Current tournament</p>
+  <h1>No tournament in progress</h1>
+  <a class="button-link empty-state-action" href="{{ url_for('web.register') }}">Upcoming tournaments {{ icon('arrow-right') }}</a>
 </section>
 
 {% if tournaments %}
