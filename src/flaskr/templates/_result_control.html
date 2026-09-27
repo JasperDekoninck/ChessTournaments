@@ -1,0 +1,31 @@
+{% macro result_control(board, readonly, labels) %}
+  <div class="pairing-result">
+    {% if readonly %}
+      <span class="pairing-result-text">{{ labels.get(board.result_code, board.result_code or '—') }}</span>
+    {% else %}
+      <div class="pairing-result-controls" data-result-controls {% if not (board.white_entry_id and board.black_entry_id) %}hidden{% endif %}>
+        <div class="pairing-result-chooser" data-result-button-group role="group" aria-label="Choose result for board {{ board.board_no }}">
+          <button type="button" class="pairing-result-button" data-result-choice="1-0" aria-pressed="false">White wins</button>
+          <button type="button" class="pairing-result-button" data-result-choice="1/2-1/2" aria-pressed="false">Draw</button>
+          <button type="button" class="pairing-result-button" data-result-choice="0-1" aria-pressed="false">Black wins</button>
+        </div>
+        <details class="pairing-result-options" data-result-options>
+          <summary data-result-summary>Forfeit / clear</summary>
+          <div class="pairing-result-menu" role="group" aria-label="Forfeit or clear result">
+            <button type="button" class="secondary tiny" data-result-choice="1F-0F">White wins by forfeit</button>
+            <button type="button" class="secondary tiny" data-result-choice="0F-1F">Black wins by forfeit</button>
+            <button type="button" class="secondary tiny" data-result-choice="0F-0F">Both forfeit</button>
+            <button type="button" class="secondary tiny" data-result-choice="">Clear result</button>
+          </div>
+        </details>
+      </div>
+      <span class="pairing-display pairing-result-text" data-result-label {% if board.white_entry_id and board.black_entry_id %}hidden{% endif %}>{{ 'BYE' if (board.white_entry_id and not board.black_entry_id) else '—' }}</span>
+      <select name="result_{{ board.board_no }}" hidden aria-label="Game result">
+        <option value="">—</option>
+        {% for result, label in labels.items() %}
+          <option value="{{ result }}" {% if board.result_code == result %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    {% endif %}
+  </div>
+{% endmacro %}

@@ -24,7 +24,8 @@ from .auth import login_required, set_admin_password, verify_password
 from .mailer import send_registration_email, send_waitlist_confirmation_email
 from .teams import assign_team_members, parse_elo, parse_member_emails, parse_team_size, register_team_members, team_members, validate_team_name
 from .core import (
-    VALID_RESULTS,
+    RESULT_LABELS,
+    FORFEIT_RESULTS,
     attach_entries_to_tournament,
     compact_waitlist,
     compute_standings,
@@ -48,12 +49,14 @@ from .core import (
     normalize_name,
     parse_manual_pairing_form,
     parse_datetime_local,
+    parse_rounds_planned,
     parse_registration_form_fields,
     parse_registration_csv,
     parse_int,
     public_rounds,
     registration_counts,
     registration_open_for_tournament,
+    registration_local_time,
     replace_round_pairings,
     result_points_label,
     round_rating_value,
@@ -84,6 +87,7 @@ from .rating_integration import (
 
 
 bp = Blueprint("web", __name__)
+bp.add_app_template_filter(registration_local_time)
 ADMIN_TABS = {"create", "tournaments", "members", "password"}
 
 
@@ -429,11 +433,33 @@ def _entry_state_payload(db, entry_id: int) -> dict | None:
 
 def _tournament_round_meta(db, tournament) -> tuple[int | None, int | None, int | None]:
     latest_round = latest_paired_round(db, tournament["id"])
+    if tournament["is_historical"] or tournament["status"] == "completed":
+        return latest_round, None, None
     next_round = next_round_to_pair(db, tournament["id"], tournament["rounds_planned"])
     editable_round = next_round
     if latest_round is not None and not pairings_complete(db, tournament["id"], latest_round):
         editable_round = latest_round
     return latest_round, next_round, editable_round
+
+
+def _round_edit_error(db, tournament, round_no: int) -> str | None:
+    if tournament["is_historical"] or tournament["status"] == "completed":
+        return "This tournament is finished or read-only. Round changes are locked."
+    if not 1 <= round_no <= tournament["rounds_planned"]:
+        return "This round is outside the tournament's planned rounds."
+    latest = latest_paired_round(db, tournament["id"]) or 0
+    if round_no < latest:
+        return "This round is locked because a later round has already been paired."
+    if any(not pairings_complete(db, tournament["id"], previous) for previous in range(1, round_no)):
+        return "Complete all previous rounds before pairing this round."
+    return None
+
+
+def _round_change_rejected(tournament, round_no: int, message: str):
+    if _wants_json():
+        return jsonify({"ok": False, "message": message}), 400
+    flash_warning(message)
+    return redirect(_admin_tournament_url(tournament["slug"], round_no))
 
 
 def _round_is_locked(db, tournament, round_no: int) -> bool:
@@ -447,6 +473,7 @@ def _repeat_pairing_warning(db, tournament_id: int, round_no: int, boards: list[
         if pairing["round_no"] != round_no
         and pairing["white_entry_id"] is not None
         and pairing["black_entry_id"] is not None
+        and normalize_result_code(pairing["result_code"]) not in FORFEIT_RESULTS
     }
     for board in boards:
         if board.get("black_entry_id") is None:
@@ -593,6 +620,7 @@ def _round_panels(tournament, entries, availability):
                 "pairings": current_pairings,
                 "entries": editable_pool,
                 "has_pairings": bool(current_pairings),
+                "lock_reason": _round_edit_error(db, tournament, round_no),
             }
         )
     return panels
@@ -1027,11 +1055,11 @@ def create_tournament():
     sync_member_statuses(db)
     name = (request.form.get("name") or "").strip()
     event_date = (request.form.get("event_date") or "").strip()
-    rounds_planned = parse_int(request.form.get("rounds_planned"), default=7)
     csv_file = request.files.get("registrations")
     is_team = request.form.get("is_team") == "1"
     excludes_rating = is_team or request.form.get("excludes_rating") == "1"
     try:
+        rounds_planned = parse_rounds_planned(request.form.get("rounds_planned", "7"))
         team_size = parse_team_size(request.form.get("team_size", "2")) if is_team else 2
     except ValueError as exc:
         flash_error(str(exc))
@@ -1111,10 +1139,19 @@ def update_tournament_settings(slug: str):
     is_team = request.form.get("is_team") == "1"
     excludes_rating = is_team or request.form.get("excludes_rating") == "1"
     try:
+        rounds_planned = parse_rounds_planned(request.form.get("rounds_planned", str(tournament["rounds_planned"])))
         team_size = parse_team_size(request.form.get("team_size", str(tournament["team_size"]))) if is_team else tournament["team_size"]
     except ValueError as exc:
         flash_error(str(exc))
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    if rounds_planned != tournament["rounds_planned"]:
+        if tournament["status"] == "completed":
+            flash_error("The number of rounds cannot change after the tournament is finished.")
+            return redirect(url_for("web.admin_tournament_detail", slug=slug))
+        latest_round = latest_paired_round(db, tournament["id"]) or 0
+        if rounds_planned < latest_round:
+            flash_error(f"Keep at least {latest_round} rounds: round {latest_round} already has pairings.")
+            return redirect(url_for("web.admin_tournament_detail", slug=slug))
     if is_team != bool(tournament["is_team"]) and (
         db.execute("SELECT 1 FROM tournament_entry WHERE tournament_id = ?", (tournament["id"],)).fetchone()
         or team_members(db, tournament["id"])
@@ -1138,9 +1175,15 @@ def update_tournament_settings(slug: str):
         flash_error("Team size cannot change after pairings begin or conflict with registered teams.")
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
     db.execute(
-        "UPDATE tournament SET excludes_rating = ?, is_team = ?, team_size = ?, public_insights_json = NULL WHERE id = ?",
-        (int(excludes_rating), int(is_team), team_size, tournament["id"]),
+        "UPDATE tournament SET excludes_rating = ?, is_team = ?, team_size = ?, rounds_planned = ?, public_insights_json = NULL WHERE id = ?",
+        (int(excludes_rating), int(is_team), team_size, rounds_planned, tournament["id"]),
     )
+    if rounds_planned != tournament["rounds_planned"]:
+        db.execute(
+            "DELETE FROM entry_round_status WHERE round_no > ? AND entry_id IN (SELECT id FROM tournament_entry WHERE tournament_id = ?)",
+            (rounds_planned, tournament["id"]),
+        )
+        ensure_round_status_rows(db, tournament["id"], rounds_planned)
     db.commit()
     if excludes_rating != bool(tournament["excludes_rating"]) and tournament["status"] == "completed":
         rebuild_current_manager(db)
@@ -1199,7 +1242,7 @@ def update_tournament_registration(slug: str):
     try:
         opens_at = parse_datetime_local(opens_at_raw)
     except ValueError:
-        flash_error("Choose a valid registration opening date and time.")
+        flash_error("Choose a valid registration opening date and time in Europe/Zurich (times skipped by daylight saving are invalid).")
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
     registration_enabled = (request.form.get("registration_enabled") or "").strip() == "1"
@@ -1297,7 +1340,7 @@ def admin_tournament_detail(slug: str):
         editable_round=editable_round,
         locked_rounds=locked_rounds,
         open_round=open_round,
-        valid_results=sorted(VALID_RESULTS),
+        result_labels=RESULT_LABELS,
     )
 
 
@@ -1321,6 +1364,11 @@ def _admin_round_updates_payload(db, tournament, round_no: int) -> dict:
             }
             for entry in entries
         ],
+        "has_pairings": bool(fetch_pairings(db, tournament["id"], round_no)),
+        "round_locks": {
+            number: _round_edit_error(db, tournament, number)
+            for number in range(1, tournament["rounds_planned"] + 1)
+        },
         "next_round": next_round_to_pair(db, tournament["id"], tournament["rounds_planned"]),
     }
 
@@ -1559,16 +1607,19 @@ def admin_round_detail(slug: str, round_no: int):
 @login_required
 def generate_round(slug: str, round_no: int):
     db = get_db()
+    db.execute("BEGIN IMMEDIATE")
     tournament = _tournament_or_404(slug)
-    if not _ensure_editable(tournament):
-        return redirect(_admin_tournament_url(slug, round_no))
+    error = _round_edit_error(db, tournament, round_no)
     next_round = next_round_to_pair(db, tournament["id"], tournament["rounds_planned"])
-    if next_round is None or round_no != next_round:
-        flash_warning("You can only generate pairings for the next new round after the previous round is complete.")
-        return redirect(_admin_tournament_url(slug, round_no))
-    boards = generate_swiss_pairings(db, tournament["id"], round_no)
+    if error or next_round is None or round_no != next_round:
+        return _round_change_rejected(tournament, round_no, error or
+            "You can only generate pairings for the next new round after the previous round is complete.")
+    try:
+        boards = generate_swiss_pairings(db, tournament["id"], round_no)
+    except ValueError as exc:
+        return _round_change_rejected(tournament, round_no, str(exc))
     if not boards:
-        flash_warning("Not enough available players, or no legal FIDE Dutch pairing was found.")
+        flash_warning("Not enough available entrants, or no complete legal pairing was found.")
     else:
         replace_round_pairings(db, tournament["id"], round_no, boards)
         db.execute(
@@ -1585,10 +1636,11 @@ def generate_round(slug: str, round_no: int):
 @login_required
 def save_round(slug: str, round_no: int):
     db = get_db()
+    db.execute("BEGIN IMMEDIATE")
     tournament = _tournament_or_404(slug)
-    if not _ensure_editable(tournament):
-        return redirect(_admin_tournament_url(slug, round_no))
-    ensure_round_status_rows(db, tournament["id"], tournament["rounds_planned"])
+    error = _round_edit_error(db, tournament, round_no)
+    if error:
+        return _round_change_rejected(tournament, round_no, error)
     availability = fetch_availability(db, tournament["id"])
     entries = fetch_entries(db, tournament["id"])
     active_entry_ids = {
@@ -1603,8 +1655,10 @@ def save_round(slug: str, round_no: int):
         if entry_id is not None
     }
     allowed_entry_ids = active_entry_ids | existing_pairing_ids
-    board_count = parse_int(request.form.get("board_count"), default=ceil(len(active_entry_ids) / 2))
     try:
+        board_count = int(request.form.get("board_count", ceil(len(active_entry_ids) / 2)))
+        if not 0 <= board_count <= max(1, len(entries)):
+            raise ValueError("Invalid board count.")
         boards = parse_manual_pairing_form(request.form, allowed_entry_ids, board_count)
     except ValueError as exc:
         if _wants_json():

@@ -90,6 +90,7 @@ const updatePairingDisplay = (row) => {
   const whiteSelect = row.querySelector('select[name^="white_"]');
   const blackSelect = row.querySelector('select[name^="black_"]');
   const resultSelect = row.querySelector('select[name^="result_"]');
+  if (!resultSelect) return;
   const whiteDisplay = row.querySelector('[data-pairing-display="white"]');
   const blackDisplay = row.querySelector('[data-pairing-display="black"]');
   const resultLabel = row.querySelector("[data-result-label]");
@@ -116,13 +117,20 @@ const updatePairingDisplay = (row) => {
   if (blackSelect && blackDisplay) {
     blackDisplay.textContent = blackSelect.options[blackSelect.selectedIndex]?.text || "Bye / empty";
   }
+  const controls = row.querySelector("[data-result-controls]");
+  if (controls) controls.hidden = !hasPairing;
   if (resultButtons) {
-    resultButtons.hidden = !hasPairing;
-    resultButtons.querySelectorAll("[data-result-choice]").forEach((button) => {
+    row.querySelectorAll("[data-result-choice]").forEach((button) => {
       const isSelected = resultSelect?.value === button.dataset.resultChoice;
       button.classList.toggle("is-selected", isSelected);
       button.setAttribute("aria-pressed", isSelected ? "true" : "false");
     });
+  }
+  const summary = row.querySelector("[data-result-summary]");
+  if (summary) {
+    summary.textContent = resultSelect.value.includes("F")
+      ? resultSelect.selectedOptions[0].textContent : "Forfeit / clear";
+    summary.classList.toggle("is-forfeit", resultSelect.value.includes("F"));
   }
   if (resultLabel) {
     resultLabel.textContent = hasWhite ? (hasOpponent ? "—" : "BYE") : "—";
@@ -247,6 +255,7 @@ const bindPairingRow = (form, row, openRow) => {
         return;
       }
       event.stopPropagation();
+      if (field.querySelector("select")?.matches(":disabled")) return;
       openRow(row);
       const select = field.querySelector("select");
       if (!select) {
@@ -266,6 +275,7 @@ const bindPairingRow = (form, row, openRow) => {
         return;
       }
       event.preventDefault();
+      if (field.querySelector("select")?.matches(":disabled")) return;
       openRow(row);
       const select = field.querySelector("select");
       if (!select) {
@@ -291,6 +301,7 @@ const bindPairingRow = (form, row, openRow) => {
       }
       resultSelect.value = button.dataset.resultChoice || "";
       updatePairingDisplay(row);
+      row.querySelector("[data-result-options]")?.removeAttribute("open");
       resultSelect.dispatchEvent(new Event("change", { bubbles: true }));
     });
   });
@@ -352,7 +363,19 @@ const initRoundEditors = () => {
       openRow(row);
     };
 
+    let saving = false;
+    let saveAgain = false;
+    const markPending = (pending) => {
+      form.dataset.savePending = pending ? "1" : "0";
+      const anyPending = document.querySelector('[data-save-pending="1"]');
+      document.querySelectorAll("[data-generate-form] button, [data-finish-tournament]").forEach((button) => {
+        button.disabled = Boolean(anyPending);
+      });
+    };
     const save = async () => {
+      if (saving) { saveAgain = true; return; }
+      saving = true;
+      let succeeded = false;
       try {
         const response = await fetch(form.action, {
           method: "POST",
@@ -366,11 +389,32 @@ const initRoundEditors = () => {
         if (!response.ok || !payload.ok) {
           throw new Error(payload.message || "Save failed.");
         }
+        succeeded = true;
         setSaveStatus(form, payload.warning || "");
         applyEntryUpdates(Number(form.dataset.roundNo), payload.entry_updates);
+        const panel = form.closest("[data-round-panel]");
+        if (panel) panel.dataset.hasPairings = payload.has_pairings ? "1" : "0";
         updateGenerateForms(payload.next_round);
+        document.querySelectorAll("[data-round-panel]").forEach((roundPanel) => {
+          const reason = payload.round_locks?.[roundPanel.dataset.roundPanelNo];
+          if (reason === undefined) return;
+          const editor = roundPanel.querySelector("[data-round-editor]");
+          if (editor) editor.disabled = Boolean(reason);
+          const notice = roundPanel.querySelector("[data-round-lock-reason]");
+          if (notice) { notice.hidden = !reason; notice.textContent = reason || ""; }
+          const addButton = roundPanel.querySelector("[data-add-board]");
+          if (addButton) addButton.hidden = Boolean(reason);
+        });
       } catch (error) {
         setSaveStatus(form, error.message || "Save failed.", true);
+      } finally {
+        saving = false;
+        if (saveAgain) {
+          saveAgain = false;
+          await save();
+        } else if (succeeded && timer === null) {
+          markPending(false);
+        }
       }
     };
 
@@ -388,8 +432,10 @@ const initRoundEditors = () => {
       if (row) {
         updatePairingDisplay(row);
       }
+      markPending(true);
+      setSaveStatus(form, "Saving…");
       window.clearTimeout(timer);
-      timer = window.setTimeout(save, 180);
+      timer = window.setTimeout(() => { timer = null; save(); }, 180);
     });
 
     document.addEventListener("click", (event) => {

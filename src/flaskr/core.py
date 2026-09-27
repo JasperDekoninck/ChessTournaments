@@ -7,16 +7,24 @@ import re
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from functools import lru_cache
-from itertools import combinations
 from math import ceil
+from zoneinfo import ZoneInfo
 
 
-VALID_RESULTS = {"1-0", "0-1", "1/2-1/2", "BYE"}
+from .swiss_pairing import ENGINE_RESULTS, pair_swiss
+
+
+VALID_RESULTS = set(ENGINE_RESULTS) | {"BYE"}
+FORFEIT_RESULTS = {code for code, (_, _, played) in ENGINE_RESULTS.items() if not played}
+RESULT_LABELS = {
+    "1-0": "White wins", "1/2-1/2": "Draw", "0-1": "Black wins",
+    "1F-0F": "White wins by forfeit", "0F-1F": "Black wins by forfeit",
+    "0F-0F": "Both forfeit", "BYE": "Bye",
+}
 VALID_REGISTRATION_FIELD_TYPES = {"text", "dropdown"}
-INITIAL_DUTCH_COLOR = "white"
+REGISTRATION_TIMEZONE = ZoneInfo("Europe/Zurich")
 
 
 def normalize_name(name: str) -> str:
@@ -72,13 +80,44 @@ def counts_for_rating(tournament) -> bool:
     )
 
 
+def registration_datetime(value: str) -> datetime:
+    """Interpret legacy, timezone-free schedules as Zurich wall time."""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=REGISTRATION_TIMEZONE)
+        # Reject wall times skipped by the spring daylight-saving transition.
+        restored = parsed.astimezone(timezone.utc).astimezone(REGISTRATION_TIMEZONE)
+        if restored.replace(tzinfo=None) != parsed.replace(tzinfo=None):
+            raise ValueError("This time does not exist in Europe/Zurich because the clocks move forward.")
+    return parsed
+
+
+def registration_local_time(value: str | None) -> str:
+    if not value:
+        return ""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(REGISTRATION_TIMEZONE)
+    return parsed.replace(tzinfo=None).isoformat(timespec="minutes")
+
+
 def parse_datetime_local(value: str | None) -> str | None:
     if value is None:
         return None
     cleaned = str(value).strip()
     if not cleaned:
         return None
-    return datetime.fromisoformat(cleaned).isoformat(timespec="minutes")
+    return registration_datetime(cleaned).astimezone(REGISTRATION_TIMEZONE).isoformat(timespec="minutes")
+
+
+def parse_rounds_planned(value: str) -> int:
+    try:
+        rounds = int(value)
+    except (ValueError, TypeError):
+        raise ValueError("Choose a whole number of rounds between 1 and 15.") from None
+    if not 1 <= rounds <= 15:
+        raise ValueError("Choose a whole number of rounds between 1 and 15.")
+    return rounds
 
 
 def fuzzy_best_match(name: str, candidates: list[str]) -> tuple[str | None, float]:
@@ -239,8 +278,14 @@ def registration_open_for_tournament(tournament, current_time: datetime | None =
     opens_at = tournament["registration_opens_at"]
     if not opens_at:
         return False
-    now = current_time or datetime.now()
-    return datetime.fromisoformat(opens_at) <= now
+    now = current_time or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=REGISTRATION_TIMEZONE)
+    try:
+        opening = registration_datetime(opens_at)
+    except ValueError:
+        return False
+    return opening.astimezone(timezone.utc) <= now.astimezone(timezone.utc)
 
 
 def fetch_open_registration_tournaments(db, current_time: datetime | None = None):
@@ -455,15 +500,6 @@ def fetch_pairings(db, tournament_id: int, round_no: int | None = None):
     ).fetchall()
 
 
-def had_bye_before(pairings, entry_id: int, round_no: int) -> bool:
-    for pairing in pairings:
-        if pairing["round_no"] >= round_no:
-            continue
-        if pairing["black_entry_id"] is None and pairing["white_entry_id"] == entry_id:
-            return True
-    return False
-
-
 def normalize_result_code(result_code: str | None) -> str | None:
     if result_code is None:
         return None
@@ -658,6 +694,14 @@ def compute_standings(
                 "awarded": white_points,
             }
             continue
+        if normalize_result_code(result_code) in FORFEIT_RESULTS:
+            white_points, black_points = _result_tuple(result_code)
+            for entry_id, points in ((white_id, white_points), (black_id, black_points)):
+                rows[entry_id]["score"] += points
+                pairing_records[entry_id][pairing["round_no"]] = {
+                    "kind": "forfeit", "awarded": points, "is_vur": points == 0,
+                }
+            continue
         pairing_records[white_id][pairing["round_no"]] = {
             "kind": "game",
             "opponent_id": black_id,
@@ -703,13 +747,13 @@ def compute_standings(
         for round_no in sorted(paired_rounds):
             record = pairing_records.get(entry_id, {}).get(round_no)
             if record is not None:
-                if record["kind"] == "pab":
+                if record["kind"] in {"pab", "forfeit"}:
                     unplayed_rounds_by_entry[entry_id].append(
                         {
                             "round_no": round_no,
-                            "kind": "pab",
+                            "kind": record["kind"],
                             "awarded": float(record["awarded"]),
-                            "is_vur": False,
+                            "is_vur": record.get("is_vur", False),
                         }
                     )
                 continue
@@ -732,7 +776,9 @@ def compute_standings(
         unplayed_rounds = unplayed_rounds_by_entry.get(entry_id, [])
         non_vur_rounds_after = set()
         for round_no, record in pairing_records.get(entry_id, {}).items():
-            if record["kind"] in {"game", "pab"}:
+            if record["kind"] in {"game", "pab"} or (
+                record["kind"] == "forfeit" and not record["is_vur"]
+            ):
                 non_vur_rounds_after.add(round_no)
         for unplayed in unplayed_rounds:
             if not unplayed["is_vur"]:
@@ -799,524 +845,24 @@ def persist_final_standings(db, tournament_id: int):
         db.commit()
 
 
-def _row_value(row: dict, key: str, default=None):
-    if hasattr(row, "get"):
-        return row.get(key, default)
-    try:
-        return row[key]
-    except (KeyError, IndexError, TypeError):
-        return default
-
-
-def _pairing_number(row: dict) -> int:
-    value = (
-        _row_value(row, "tpn")
-        or _row_value(row, "pairing_number")
-        or _row_value(row, "entry_id")
-        or _row_value(row, "id")
-        or 999999
-    )
-    return int(value)
-
-
-def _dutch_order_key(row: dict) -> tuple[float, int, str]:
-    return (-float(row["score"]), _pairing_number(row), row["name"].casefold())
-
-
-def _initial_pairing_order_key(row: dict) -> tuple[int, str, int]:
-    return (-int(row["seed_rating"]), row["name"].casefold(), int(row["entry_id"]))
-
-
-def _colour_difference(row: dict) -> int:
-    return int(row.get("white_games", 0)) - int(row.get("black_games", 0))
-
-
-def _colour_preference(row: dict) -> tuple[str | None, str]:
-    colors = row.get("colors") or []
-    if not colors:
-        return None, "none"
-
-    diff = _colour_difference(row)
-    if diff > 1:
-        return "black", "absolute"
-    if diff < -1:
-        return "white", "absolute"
-    if len(colors) >= 2 and colors[-1] == colors[-2]:
-        return ("black" if colors[-1] == "W" else "white"), "absolute"
-    if diff == 1:
-        return "black", "strong"
-    if diff == -1:
-        return "white", "strong"
-    if diff == 0:
-        return ("black" if colors[-1] == "W" else "white"), "mild"
-    return None, "none"
-
-
-def _assigned_colour(row: dict, white: dict, black: dict) -> str:
-    return "white" if row["entry_id"] == white["entry_id"] else "black"
-
-
-def _opposite_color(color: str) -> str:
-    return "black" if color == "white" else "white"
-
-
-def _pair_is_legal(a: dict, b: dict, allow_repeats: bool = False) -> bool:
-    if not allow_repeats and (
-        b["entry_id"] in a["opponent_ids"] or a["entry_id"] in b["opponent_ids"]
-    ):
-        return False
-    a_pref, a_strength = _colour_preference(a)
-    b_pref, b_strength = _colour_preference(b)
-    if (
-        a_strength == "absolute"
-        and b_strength == "absolute"
-        and a_pref == b_pref
-        and not a.get("is_topscorer")
-        and not b.get("is_topscorer")
-    ):
-        return False
-    return True
-
-
-def _colour_history_by_round(row: dict) -> dict[int, str]:
-    return {int(round_no): color for round_no, color in row.get("color_rounds", [])}
-
-
-def _recent_alternation_miss(a: dict, b: dict, a_color: str) -> int:
-    a_by_round = _colour_history_by_round(a)
-    b_by_round = _colour_history_by_round(b)
-    common_rounds = sorted(set(a_by_round) & set(b_by_round), reverse=True)
-    for round_no in common_rounds:
-        if a_by_round[round_no] == b_by_round[round_no]:
-            continue
-        desired = "black" if a_by_round[round_no] == "W" else "white"
-        return 0 if a_color == desired else 1
-
-    paired_history = list(zip(a.get("colors") or [], b.get("colors") or []))
-    for a_previous, b_previous in reversed(paired_history):
-        if a_previous == b_previous:
-            continue
-        desired = "black" if a_previous == "W" else "white"
-        return 0 if a_color == desired else 1
-    return 0
-
-
-def _next_colour_difference(row: dict, color: str) -> int:
-    return _colour_difference(row) + (1 if color == "white" else -1)
-
-
-def _same_colour_streak(row: dict, color: str) -> bool:
-    marker = "W" if color == "white" else "B"
-    colors = row.get("colors") or []
-    return len(colors) >= 2 and colors[-1] == marker and colors[-2] == marker
-
-
-def _higher_ranked(a: dict, b: dict) -> dict:
-    return a if _pairing_number(a) < _pairing_number(b) else b
-
-
-def _initial_colour_for_tpn(row: dict) -> str:
-    if _pairing_number(row) % 2 == 1:
-        return INITIAL_DUTCH_COLOR
-    return _opposite_color(INITIAL_DUTCH_COLOR)
-
-
-def _colour_assignment_quality(a: dict, b: dict, a_color: str) -> tuple[int, int, int, int, int, int, int, int]:
-    b_color = _opposite_color(a_color)
-    assigned = ((a, a_color), (b, b_color))
-    hard_damage = 0
-    absolute_misses = 0
-    preference_misses = 0
-    strong_misses = 0
-    color_balance = 0
-
-    for row, color in assigned:
-        next_diff = _next_colour_difference(row, color)
-        color_balance += abs(next_diff)
-        if abs(next_diff) > 2:
-            hard_damage += 1
-        if _same_colour_streak(row, color):
-            hard_damage += 1
-        preference, strength = _colour_preference(row)
-        if preference and preference != color:
-            preference_misses += 1
-            if strength == "absolute":
-                absolute_misses += 1
-            elif strength == "strong":
-                strong_misses += 1
-
-    alternation_miss = _recent_alternation_miss(a, b, a_color)
-    higher = _higher_ranked(a, b)
-    higher_color = a_color if higher["entry_id"] == a["entry_id"] else b_color
-    higher_preference, _ = _colour_preference(higher)
-    higher_preference_miss = 1 if higher_preference and higher_preference != higher_color else 0
-    initial_colour_miss = 0 if higher_color == _initial_colour_for_tpn(higher) else 1
-    return (
-        hard_damage,
-        absolute_misses,
-        preference_misses,
-        strong_misses,
-        alternation_miss,
-        higher_preference_miss,
-        initial_colour_miss,
-        color_balance,
-    )
-
-
-def _choose_colors(a: dict, b: dict) -> tuple[dict, dict]:
-    a_white_quality = _colour_assignment_quality(a, b, "white")
-    b_white_quality = _colour_assignment_quality(a, b, "black")
-    if a_white_quality <= b_white_quality:
-        return a, b
-    return b, a
-
-
-def _pair_penalty_tuple(a: dict, b: dict, allow_repeats: bool = False) -> tuple:
-    if not _pair_is_legal(a, b, allow_repeats=allow_repeats):
-        return (1, 999999)
-    white, black = _choose_colors(a, b)
-    a_color = _assigned_colour(a, white, black)
-    return (
-        0,
-        *_colour_assignment_quality(a, b, a_color),
-        abs(float(a["score"]) - float(b["score"])),
-        abs(_pairing_number(a) - _pairing_number(b)),
-    )
-
-
-def _pair_penalty(a: dict, b: dict) -> float:
-    penalty = _pair_penalty_tuple(a, b, allow_repeats=False)
-    if penalty[0]:
-        return float("inf")
-    return sum(float(part) for part in penalty[1:])
-
-
-def _match_halves(s1: list[dict], s2: list[dict], allow_repeats: bool = False) -> list[tuple[dict, dict]] | None:
-    if len(s1) != len(s2):
-        return None
-    if not s1:
-        return []
-
-    candidate_orders = []
-    for index, player in enumerate(s1):
-        candidates = [
-            candidate_index
-            for candidate_index, candidate in enumerate(s2)
-            if _pair_is_legal(player, candidate, allow_repeats=allow_repeats)
-        ]
-        candidates.sort(
-            key=lambda candidate_index: (
-                _pair_penalty_tuple(player, s2[candidate_index], allow_repeats=allow_repeats),
-                abs(candidate_index - index),
-                candidate_index,
-            )
-        )
-        if not candidates:
-            return None
-        candidate_orders.append(tuple(candidates))
-
-    @lru_cache(maxsize=None)
-    def search(index: int, used_mask: int) -> tuple[tuple[int, int], ...] | None:
-        if index == len(s1):
-            return ()
-        for candidate_index in candidate_orders[index]:
-            bit = 1 << candidate_index
-            if used_mask & bit:
-                continue
-            suffix = search(index + 1, used_mask | bit)
-            if suffix is not None:
-                return ((index, candidate_index),) + suffix
-        return None
-
-    matched_indices = search(0, 0)
-    if matched_indices is None:
-        return None
-    return [tuple(_choose_colors(s1[left], s2[right])) for left, right in matched_indices]
-
-
-def _arbitrary_group_matching(group: list[dict], allow_repeats: bool = False) -> list[tuple[dict, dict]] | None:
-    rows_by_id = {row["entry_id"]: row for row in group}
-    ordered_ids = tuple(row["entry_id"] for row in sorted(group, key=_dutch_order_key))
-
-    @lru_cache(maxsize=None)
-    def search(remaining_ids: tuple[int, ...]) -> tuple[tuple[int, int], ...] | None:
-        if not remaining_ids:
-            return ()
-        current_id = remaining_ids[0]
-        current = rows_by_id[current_id]
-        candidates = [
-            candidate_id
-            for candidate_id in remaining_ids[1:]
-            if _pair_is_legal(current, rows_by_id[candidate_id], allow_repeats=allow_repeats)
-        ]
-        candidates.sort(
-            key=lambda candidate_id: (
-                _pair_penalty_tuple(current, rows_by_id[candidate_id], allow_repeats=allow_repeats),
-                _pairing_number(rows_by_id[candidate_id]),
-            )
-        )
-        for candidate_id in candidates:
-            rest_ids = tuple(entry_id for entry_id in remaining_ids[1:] if entry_id != candidate_id)
-            suffix = search(rest_ids)
-            if suffix is not None:
-                return ((current_id, candidate_id),) + suffix
-        return None
-
-    pairs = search(ordered_ids)
-    if pairs is None:
-        return None
-    return [tuple(_choose_colors(rows_by_id[first], rows_by_id[second])) for first, second in pairs]
-
-
-def _pair_group_matching(group: list[dict], allow_repeats: bool) -> list[tuple[dict, dict]] | None:
-    if len(group) % 2 == 1:
-        return None
-    ordered = sorted(group, key=_dutch_order_key)
-    midpoint = len(ordered) // 2
-    s1 = ordered[:midpoint]
-    s2 = ordered[midpoint:]
-    pairs = _match_halves(s1, s2, allow_repeats=allow_repeats)
-    if pairs is not None:
-        return pairs
-    return _arbitrary_group_matching(ordered, allow_repeats=allow_repeats)
-
-
-def _pair_group(group: list[dict]) -> list[tuple[dict, dict]]:
-    return _pair_group_matching(group, allow_repeats=False) or []
-
-
-def _heterogeneous_bracket_matching(
-    moved_down_rows: list[dict],
-    resident_rows: list[dict],
-) -> list[tuple[dict, dict]] | None:
-    if len(moved_down_rows) > len(resident_rows):
-        return None
-
-    moved_down = sorted(moved_down_rows, key=_dutch_order_key)
-    residents = sorted(resident_rows, key=_dutch_order_key)
-    rows_by_id = {row["entry_id"]: row for row in moved_down + residents}
-
-    @lru_cache(maxsize=None)
-    def assign_moved_down(index: int, used_mask: int) -> tuple[tuple[int, int], ...] | None:
-        if index == len(moved_down):
-            remaining_residents = [
-                row
-                for resident_index, row in enumerate(residents)
-                if not (used_mask & (1 << resident_index))
-            ]
-            resident_pairs = _pair_group_matching(remaining_residents, allow_repeats=False)
-            if resident_pairs is None or len(resident_pairs) * 2 != len(remaining_residents):
-                return None
-            return tuple(
-                (white["entry_id"], black["entry_id"])
-                for white, black in resident_pairs
-            )
-
-        player = moved_down[index]
-        candidates = [
-            resident_index
-            for resident_index, resident in enumerate(residents)
-            if not (used_mask & (1 << resident_index))
-            and _pair_is_legal(player, resident, allow_repeats=False)
-        ]
-        candidates.sort(
-            key=lambda resident_index: (
-                _pair_penalty_tuple(player, residents[resident_index], allow_repeats=False),
-                resident_index,
-            )
-        )
-        for resident_index in candidates:
-            white, black = _choose_colors(player, residents[resident_index])
-            suffix = assign_moved_down(index + 1, used_mask | (1 << resident_index))
-            if suffix is not None:
-                return ((white["entry_id"], black["entry_id"]),) + suffix
-        return None
-
-    paired_ids = assign_moved_down(0, 0)
-    if paired_ids is None:
-        return None
-    return [(rows_by_id[white_id], rows_by_id[black_id]) for white_id, black_id in paired_ids]
-
-
-def _bracket_matching(
-    paired_rows: list[dict],
-    moved_down_ids: set[int],
-) -> list[tuple[dict, dict]] | None:
-    moved_down_rows = [row for row in paired_rows if row["entry_id"] in moved_down_ids]
-    if not moved_down_rows:
-        return _pair_group_matching(paired_rows, allow_repeats=False)
-    resident_rows = [row for row in paired_rows if row["entry_id"] not in moved_down_ids]
-    return _heterogeneous_bracket_matching(moved_down_rows, resident_rows)
-
-
-def _bye_sort_key(row: dict, round_no: int) -> tuple[float, int, int]:
-    unplayed_games = max(0, (round_no - 1) - len(row.get("colors") or []))
-    return (float(row["score"]), unplayed_games, -_pairing_number(row))
-
-
-def _downfloater_sort_key(row: dict) -> tuple[float, int]:
-    return (float(row["score"]), -_pairing_number(row))
-
-
-def _downfloater_set_key(rows: list[dict]) -> tuple[int, tuple[float, ...], tuple[int, ...]]:
-    ordered = sorted(rows, key=_downfloater_sort_key)
-    return (
-        len(rows),
-        tuple(sorted((float(row["score"]) for row in ordered), reverse=True)),
-        tuple(-_pairing_number(row) for row in ordered),
-    )
-
-
-def _annotate_dutch_pairing_state(rows: list[dict], rounds_planned: int, round_no: int) -> list[dict]:
-    annotated = [dict(row) for row in rows]
-    tpn_by_id = {
-        row["entry_id"]: index
-        for index, row in enumerate(sorted(annotated, key=_initial_pairing_order_key), start=1)
-    }
-    for row in annotated:
-        row["tpn"] = tpn_by_id[row["entry_id"]]
-        row["is_topscorer"] = (
-            round_no == rounds_planned
-            and float(row["score"]) > ((round_no - 1) / 2)
-        )
-    return annotated
-
-
-def _boards_from_pairs(pairs: list[tuple[dict, dict]]) -> list[dict]:
-    boards = []
-    for board_no, (white, black) in enumerate(pairs, start=1):
-        boards.append(
-            {
-                "board_no": board_no,
-                "white_entry_id": white["entry_id"],
-                "black_entry_id": black["entry_id"],
-            }
-        )
-    return boards
-
-
-def _dutch_boards_for_pool(active: list[dict], round_no: int) -> list[dict] | None:
-    if len(active) % 2 == 1:
-        return None
-    if round_no == 1:
-        ordered = sorted(active, key=lambda row: _pairing_number(row))
-        midpoint = len(ordered) // 2
-        pairs = [tuple(_choose_colors(a, b)) for a, b in zip(ordered[:midpoint], ordered[midpoint:])]
-        return _boards_from_pairs(pairs)
-
-    rows_by_id = {row["entry_id"]: row for row in active}
-    groups: dict[float, list[int]] = defaultdict(list)
-    for row in active:
-        groups[float(row["score"])].append(row["entry_id"])
-    score_groups = [
-        tuple(sorted(groups[score], key=lambda entry_id: _dutch_order_key(rows_by_id[entry_id])))
-        for score in sorted(groups.keys(), reverse=True)
-    ]
-
-    @lru_cache(maxsize=None)
-    def pair_brackets(index: int, moved_down_ids: tuple[int, ...]) -> tuple[tuple[int, int], ...] | None:
-        if index == len(score_groups):
-            return () if not moved_down_ids else None
-
-        bracket_ids = tuple(
-            sorted(moved_down_ids, key=lambda entry_id: _dutch_order_key(rows_by_id[entry_id]))
-        ) + score_groups[index]
-        is_last_bracket = index == len(score_groups) - 1
-        downfloater_counts = [0] if is_last_bracket else [
-            count
-            for count in range(0, len(bracket_ids) + 1)
-            if (len(bracket_ids) - count) % 2 == 0
-        ]
-
-        for downfloater_count in downfloater_counts:
-            candidate_sets = sorted(
-                combinations(bracket_ids, downfloater_count),
-                key=lambda ids: _downfloater_set_key([rows_by_id[entry_id] for entry_id in ids]),
-            )
-            for downfloater_ids in candidate_sets:
-                downfloater_id_set = set(downfloater_ids)
-                paired_rows = [
-                    rows_by_id[entry_id]
-                    for entry_id in bracket_ids
-                    if entry_id not in downfloater_id_set
-                ]
-                bracket_pairs = _bracket_matching(paired_rows, set(moved_down_ids))
-                if bracket_pairs is None or len(bracket_pairs) * 2 != len(paired_rows):
-                    continue
-                ordered_downfloaters = tuple(
-                    sorted(downfloater_ids, key=lambda entry_id: _dutch_order_key(rows_by_id[entry_id]))
-                )
-                suffix = pair_brackets(index + 1, ordered_downfloaters)
-                if suffix is None:
-                    continue
-                current_pairs = tuple(
-                    (white["entry_id"], black["entry_id"])
-                    for white, black in bracket_pairs
-                )
-                return current_pairs + suffix
-        return None
-
-    paired_ids = pair_brackets(0, tuple())
-    if paired_ids is None:
-        return None
-    pairs = [(rows_by_id[white_id], rows_by_id[black_id]) for white_id, black_id in paired_ids]
-    return _boards_from_pairs(pairs)
-
-
 def generate_swiss_pairings(db, tournament_id: int, round_no: int) -> list[dict]:
     tournament = db.execute(
-        "SELECT id, rounds_planned FROM tournament WHERE id = ?",
+        "SELECT id, rounds_planned, is_team FROM tournament WHERE id = ?",
         (tournament_id,),
     ).fetchone()
-    ensure_round_status_rows(db, tournament_id, tournament["rounds_planned"])
-    standings = _annotate_dutch_pairing_state(
-        compute_standings(db, tournament_id, through_round=round_no - 1),
-        tournament["rounds_planned"],
-        round_no,
-    )
-    availability = fetch_availability(db, tournament_id)
-    active = [
-        row
-        for row in standings
-        if row["is_active"] and availability.get(row["entry_id"], {}).get(round_no, True)
-    ]
-    if not active:
+    if tournament is None or not 1 <= round_no <= tournament["rounds_planned"]:
         return []
-
-    historical_pairings = fetch_pairings(db, tournament_id)
-    if len(active) == 1:
-        only_entry = active[0]
-        if had_bye_before(historical_pairings, only_entry["entry_id"], round_no):
-            return []
-        return [{"board_no": 1, "white_entry_id": only_entry["entry_id"], "black_entry_id": None}]
-
-    bye_entry = None
-    boards = None
-    if len(active) % 2 == 1:
-        bye_candidates = sorted(
-            [
-                row
-                for row in active
-                if not had_bye_before(historical_pairings, row["entry_id"], round_no)
-            ],
-            key=lambda row: _bye_sort_key(row, round_no),
-        )
-        for candidate in bye_candidates:
-            pool = [row for row in active if row["entry_id"] != candidate["entry_id"]]
-            boards = _dutch_boards_for_pool(pool, round_no)
-            if boards is not None:
-                bye_entry = candidate
-                break
-        if boards is None or bye_entry is None:
-            return []
-    else:
-        boards = _dutch_boards_for_pool(active, round_no)
-        if boards is None:
-            return []
-
-    if bye_entry is not None:
-        boards.append({"board_no": len(boards) + 1, "white_entry_id": bye_entry["entry_id"], "black_entry_id": None})
-    return boards
+    entries = fetch_entries(db, tournament_id)
+    availability = fetch_availability(db, tournament_id)
+    available_ids = {
+        entry["id"] for entry in entries
+        if entry["is_active"] and entry["waitlist_position"] is None
+        and availability.get(entry["id"], {}).get(round_no, True)
+    }
+    return pair_swiss(
+        entries, fetch_pairings(db, tournament_id), available_ids,
+        round_no, tournament["rounds_planned"], is_team=bool(tournament["is_team"]),
+    )
 
 
 def replace_round_pairings(db, tournament_id: int, round_no: int, boards: list[dict], manual_override: bool = False):
@@ -1355,7 +901,11 @@ def parse_manual_pairing_form(form, active_entry_ids: set[int], board_count: int
         white_id = parse_int(form.get(f"white_{board_no}"))
         black_id = parse_int(form.get(f"black_{board_no}"))
         result_code = normalize_result_code((form.get(f"result_{board_no}") or "").strip() or None)
+        if result_code is not None and result_code not in VALID_RESULTS:
+            raise ValueError("Choose a valid game result.")
         if white_id is None:
+            if black_id is not None:
+                raise ValueError("Choose a white player before saving this board.")
             continue
         if white_id not in active_entry_ids:
             raise ValueError("Manual pairing references a player who is not available this round.")
@@ -1515,7 +1065,11 @@ def attach_entries_to_tournament(db, tournament_id: int, imported_rows: list[dic
 
 def pairings_complete(db, tournament_id: int, round_no: int) -> bool:
     rows = fetch_pairings(db, tournament_id, round_no)
-    return bool(rows) and all(normalize_result_code(row["result_code"]) is not None for row in rows)
+    return bool(rows) and all(
+        normalize_result_code(row["result_code"]) in (
+            VALID_RESULTS - {"BYE"} if row["black_entry_id"] is not None else {"BYE"}
+        ) for row in rows
+    )
 
 
 def next_round_to_pair(db, tournament_id: int, rounds_planned: int) -> int | None:

@@ -1,3 +1,4 @@
+{% from "_result_control.html" import result_control %}
 {% extends "base.html" %}
 {% from "_ui.html" import icon %}
 {% block title %}{{ tournament.name }} · Admin{% endblock %}
@@ -33,7 +34,7 @@
       <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}" data-confirm="{{ 'Finish this unrated tournament?' if tournament.excludes_rating else 'Finish this tournament and update the leaderboard?' }}" data-preserve-open-round>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="open_round" value="">
-        <button type="submit" class="secondary">{{ "Finished" if tournament.status == "completed" else ("Finish tournament" if tournament.excludes_rating else "Finish tournament and update leaderboard") }}</button>
+        <button type="submit" class="secondary" data-finish-tournament {% if tournament.status == "completed" %}disabled{% endif %}>{{ "Finished" if tournament.status == "completed" else ("Finish tournament" if tournament.excludes_rating else "Finish tournament and update leaderboard") }}</button>
       </form>
     {% endif %}
   </div>
@@ -153,12 +154,11 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="secondary">Generate pairings</button>
               </form>
-              {% if panel.round_no == editable_round %}
-                <button type="button" class="secondary tiny" data-add-board>{{ icon('plus') }} Add board</button>
-              {% endif %}
+              <button type="button" class="secondary tiny" data-add-board {% if panel.lock_reason %}hidden{% endif %}>{{ icon('plus') }} Add board</button>
             </div>
           {% endif %}
 
+          <p class="muted" data-round-lock-reason {% if not panel.lock_reason %}hidden{% endif %}>{{ panel.lock_reason or '' }}</p>
           {% if panel.board_count == 0 %}
             <p class="muted">Not enough available players in this round.</p>
           {% else %}
@@ -170,6 +170,7 @@
             >
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="board_count" value="{{ panel.board_count }}" data-board-count>
+              <fieldset class="round-editor" data-round-editor {% if panel.lock_reason %}disabled{% endif %}>
               <div class="pairing-list" data-pairing-list>
                 {% for board in panel.board_rows %}
                   <div class="pairing-row{% if not board.white_entry_id %} is-empty{% endif %}" data-pairing-row>
@@ -189,34 +190,7 @@
                         </div>
                       {% endif %}
                     </div>
-                    <div class="pairing-result">
-                      <div
-                        class="pairing-result-chooser"
-                        data-result-button-group
-                        role="group"
-                        aria-label="Choose result for board {{ board.board_no }}"
-                        {% if not (board.white_entry_id and board.black_entry_id) %}hidden{% endif %}
-                      >
-                        <button type="button" class="pairing-result-button" data-result-choice="1-0" aria-pressed="false">1-0</button>
-                        <button type="button" class="pairing-result-button" data-result-choice="1/2-1/2" aria-pressed="false">1/2</button>
-                        <button type="button" class="pairing-result-button" data-result-choice="0-1" aria-pressed="false">0-1</button>
-                      </div>
-                      <span
-                        class="pairing-display pairing-result-text"
-                        data-result-label
-                        {% if board.white_entry_id and board.black_entry_id %}hidden{% endif %}
-                      >{{ "BYE" if (board.white_entry_id and not board.black_entry_id) else "—" }}</span>
-                      {% if not tournament.is_historical %}
-                        <div class="pairing-edit">
-                          <select name="result_{{ board.board_no }}">
-                            <option value="">—</option>
-                            {% for result in valid_results %}
-                              <option value="{{ result }}" {% if board.result_code == result %}selected{% endif %}>{{ result }}</option>
-                            {% endfor %}
-                          </select>
-                        </div>
-                      {% endif %}
-                    </div>
+                    {{ result_control(board, tournament.is_historical, result_labels) }}
                     <div class="pairing-side pairing-side-right" data-pairing-field="black" tabindex="0">
                       <span class="pairing-display" data-pairing-display="black">{{ board.black_name or "Bye / empty" }}</span>
                       {% if not tournament.is_historical %}
@@ -233,6 +207,7 @@
                   </div>
                 {% endfor %}
               </div>
+              </fieldset>
               {% if not tournament.is_historical %}
                 <template data-empty-board-template>
                   <div class="pairing-row is-empty" data-pairing-row>
@@ -250,28 +225,7 @@
                         </select>
                       </div>
                     </div>
-                    <div class="pairing-result">
-                      <div
-                        class="pairing-result-chooser"
-                        data-result-button-group
-                        role="group"
-                        aria-label="Choose result for board __BOARD__"
-                        hidden
-                      >
-                        <button type="button" class="pairing-result-button" data-result-choice="1-0" aria-pressed="false">1-0</button>
-                        <button type="button" class="pairing-result-button" data-result-choice="1/2-1/2" aria-pressed="false">1/2</button>
-                        <button type="button" class="pairing-result-button" data-result-choice="0-1" aria-pressed="false">0-1</button>
-                      </div>
-                      <span class="pairing-display pairing-result-text" data-result-label>—</span>
-                      <div class="pairing-edit">
-                        <select name="result___BOARD__">
-                          <option value="">—</option>
-                          {% for result in valid_results %}
-                            <option value="{{ result }}">{{ result }}</option>
-                          {% endfor %}
-                        </select>
-                      </div>
-                    </div>
+                    {{ result_control({'board_no': '__BOARD__'}, false, result_labels) }}
                     <div class="pairing-side pairing-side-right" data-pairing-field="black" tabindex="0">
                       <span class="pairing-display" data-pairing-display="black">Bye / empty</span>
                       <div class="pairing-edit">
@@ -475,6 +429,10 @@
   {% endif %}
 </section>
 
+{% if tournament.is_team %}
+  {% include "_admin_team_members.html" %}
+{% endif %}
+
 <section class="section admin-danger-zone">
   <details>
     <summary>Advanced actions</summary>
@@ -510,6 +468,11 @@
       </div>
       <form method="post" action="{{ url_for('web.update_tournament_settings', slug=tournament.slug) }}" class="stack-form modal-form" data-tournament-format>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>
+          Number of rounds
+          <input type="number" name="rounds_planned" min="{{ latest_round or 1 }}" max="15" step="1" value="{{ tournament.rounds_planned }}" required {% if tournament.status == 'completed' %}readonly{% endif %}>
+        </label>
+        <p class="muted">{% if tournament.status == 'completed' %}The round count is fixed for finished tournaments.{% else %}You can add rounds or remove rounds that do not yet have pairings.{% endif %}</p>
         <label class="checkbox-row">
           <input type="checkbox" name="excludes_rating" value="1" {% if tournament.excludes_rating %}checked{% endif %}>
           <span>Exclude from ratings and rating-based prizes</span>
@@ -531,7 +494,7 @@
       <p class="lede">
         {{ "Visible on the registration page" if tournament.registration_enabled and tournament.registration_opens_at else "Hidden from the registration page" }}
         {% if tournament.registration_opens_at %}
-          · opens at {{ tournament.registration_opens_at }}
+          · opens at {{ tournament.registration_opens_at|registration_local_time }} (Europe/Zurich)
         {% endif %}
         {% if tournament.event_time %}
           · starts at {{ tournament.event_time }}
@@ -554,9 +517,10 @@
           <span>Open tournament registration</span>
         </label>
         <label>
-          Registration opens at
-          <input type="datetime-local" name="registration_opens_at" value="{{ tournament.registration_opens_at or '' }}">
+          Registration opens at (Europe/Zurich)
+          <input type="datetime-local" name="registration_opens_at" value="{{ tournament.registration_opens_at|registration_local_time }}">
         </label>
+        <p class="muted">Zurich local time (CET/CEST), regardless of the server or browser timezone.</p>
         <label>
           Start time
           <input type="time" name="event_time" value="{{ tournament.event_time or '' }}">

@@ -928,7 +928,7 @@ td form + form {
 
 .pairing-row {
   display: grid;
-  grid-template-columns: 7rem minmax(0, 1fr) 10rem minmax(0, 1fr);
+  grid-template-columns: 5rem minmax(0, 1fr) minmax(15rem, auto) minmax(0, 1fr);
   align-items: center;
   gap: 0.8rem;
   padding: 0.85rem 1rem;
@@ -1033,10 +1033,6 @@ td form + form {
 
 .pairing-row.is-editing .pairing-display {
   visibility: hidden;
-}
-
-.pairing-row.is-editing .pairing-result-chooser {
-  display: none;
 }
 
 .pairing-row.is-editing .pairing-edit {
@@ -1776,4 +1772,27 @@ tr.is-waitlist .waitlist-note {
     animation: none !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Result entry stays visible while the player selectors are open. */
+.round-editor { border: 0; padding: 0; margin: 0; min-width: 0; }
+.round-editor:disabled .pairing-side { cursor: default; }
+.pairing-result-controls { display: grid; gap: 0.3rem; justify-items: center; }
+.pairing-result-options { position: relative; font-size: 0.8rem; }
+.pairing-result-options summary { cursor: pointer; color: var(--muted); }
+.pairing-result-options summary.is-forfeit { color: var(--accent-deep); font-weight: 700; }
+.pairing-result-menu {
+  position: absolute; z-index: 5; left: 50%; transform: translateX(-50%);
+  display: grid; gap: 0.4rem; width: 14rem; padding: 0.65rem;
+  background: white; border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 4px 16px #0002;
+}
+.pairing-result-menu button { white-space: normal; }
+.pairing-result-button:disabled { cursor: default; }
+@media (max-width: 760px) {
+  .pairing-row { grid-template-columns: 1fr 1fr; }
+  .pairing-board { grid-column: 1 / -1; }
+  .pairing-side { grid-column: 1; grid-row: 2; }
+  .pairing-side-right { grid-column: 2; }
+  .pairing-result { grid-column: 1 / -1; grid-row: 3; }
 }

@@ -1,0 +1,261 @@
+{
+  "seed": 0,
+  "round": 2,
+  "score": 0.5,
+  "history": [
+    [
+      [
+        1,
+        7,
+        0.5
+      ],
+      [
+        8,
+        2,
+        0.5
+      ],
+      [
+        3,
+        9,
+        0
+      ],
+      [
+        10,
+        4,
+        0.5
+      ],
+      [
+        5,
+        11,
+        1
+      ],
+      [
+        12,
+        6,
+        0.5
+      ]
+    ]
+  ],
+  "group": [
+    {
+      "entry_id": 1,
+      "name": "P1",
+      "score": 0.5,
+      "seed_rating": 2450,
+      "opponent_ids": [
+        7
+      ],
+      "colors": [
+        "W"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "W"
+        ]
+      ],
+      "white_games": 1,
+      "black_games": 0,
+      "tpn": 1,
+      "is_topscorer": false
+    },
+    {
+      "entry_id": 2,
+      "name": "P2",
+      "score": 0.5,
+      "seed_rating": 2400,
+      "opponent_ids": [
+        8
+      ],
+      "colors": [
+        "B"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "B"
+        ]
+      ],
+      "white_games": 0,
+      "black_games": 1,
+      "tpn": 2,
+      "is_topscorer": false
+    },
+    {
+      "entry_id": 4,
+      "name": "P4",
+      "score": 0.5,
+      "seed_rating": 2300,
+      "opponent_ids": [
+        10
+      ],
+      "colors": [
+        "B"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "B"
+        ]
+      ],
+      "white_games": 0,
+      "black_games": 1,
+      "tpn": 4,
+      "is_topscorer": false
+    },
+    {
+      "entry_id": 6,
+      "name": "P6",
+      "score": 0.5,
+      "seed_rating": 2200,
+      "opponent_ids": [
+        12
+      ],
+      "colors": [
+        "B"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "B"
+        ]
+      ],
+      "white_games": 0,
+      "black_games": 1,
+      "tpn": 6,
+      "is_topscorer": false
+    },
+    {
+      "entry_id": 7,
+      "name": "P7",
+      "score": 0.5,
+      "seed_rating": 2150,
+      "opponent_ids": [
+        1
+      ],
+      "colors": [
+        "B"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "B"
+        ]
+      ],
+      "white_games": 0,
+      "black_games": 1,
+      "tpn": 7,
+      "is_topscorer": false
+    },
+    {
+      "entry_id": 8,
+      "name": "P8",
+      "score": 0.5,
+      "seed_rating": 2100,
+      "opponent_ids": [
+        2
+      ],
+      "colors": [
+        "W"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "W"
+        ]
+      ],
+      "white_games": 1,
+      "black_games": 0,
+      "tpn": 8,
+      "is_topscorer": false
+    },
+    {
+      "entry_id": 10,
+      "name": "P10",
+      "score": 0.5,
+      "seed_rating": 2000,
+      "opponent_ids": [
+        4
+      ],
+      "colors": [
+        "W"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "W"
+        ]
+      ],
+      "white_games": 1,
+      "black_games": 0,
+      "tpn": 10,
+      "is_topscorer": false
+    },
+    {
+      "entry_id": 12,
+      "name": "P12",
+      "score": 0.5,
+      "seed_rating": 1900,
+      "opponent_ids": [
+        6
+      ],
+      "colors": [
+        "W"
+      ],
+      "color_rounds": [
+        [
+          1,
+          "W"
+        ]
+      ],
+      "white_games": 1,
+      "black_games": 0,
+      "tpn": 12,
+      "is_topscorer": false
+    }
+  ],
+  "actual": [
+    [
+      8,
+      1
+    ],
+    [
+      2,
+      10
+    ],
+    [
+      4,
+      12
+    ],
+    [
+      6,
+      7
+    ]
+  ],
+  "quality": [
+    2,
+    2
+  ],
+  "better": [
+    [
+      2,
+      1
+    ],
+    [
+      4,
+      8
+    ],
+    [
+      6,
+      10
+    ],
+    [
+      7,
+      12
+    ]
+  ],
+  "better_quality": [
+    0,
+    0
+  ]
+}

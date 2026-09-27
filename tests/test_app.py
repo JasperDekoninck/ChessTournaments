@@ -13,7 +13,6 @@ from pathlib import Path
 from flaskr import create_app
 from flaskr.auth import hash_password
 from flaskr.core import (
-    _pair_group,
     compute_standings,
     ensure_round_status_rows,
     fetch_availability,
@@ -245,9 +244,9 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'data-result-button-group', response.data)
         self.assertIn(b'data-result-choice="1-0"', response.data)
-        self.assertIn(b'>1/2</button>', response.data)
+        self.assertIn(b'>Draw</button>', response.data)
         self.assertIn(b'data-result-choice="0-1"', response.data)
-        self.assertIn(b'<select name="result_1">', response.data)
+        self.assertIn(b'<select name="result_1" hidden', response.data)
 
     def test_admin_password_hash_is_stored_in_database(self):
         with self.app.app_context():
@@ -1936,138 +1935,6 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertIn(b"Alice Example", response.data)
         self.assertNotIn(b"Bob Example", response.data)
         self.assertNotIn(b"Cara Example", response.data)
-
-    def test_pair_group_avoids_repeat_when_non_repeat_matching_exists(self):
-        group = [
-            {
-                "entry_id": 1,
-                "name": "Alpha",
-                "score": 2.0,
-                "seed_rating": 2100,
-                "opponent_ids": {4},
-                "white_games": 1,
-                "black_games": 1,
-                "colors": ["W", "B"],
-            },
-            {
-                "entry_id": 2,
-                "name": "Bravo",
-                "score": 2.0,
-                "seed_rating": 2090,
-                "opponent_ids": {3},
-                "white_games": 1,
-                "black_games": 1,
-                "colors": ["B", "W"],
-            },
-            {
-                "entry_id": 3,
-                "name": "Charlie",
-                "score": 2.0,
-                "seed_rating": 1900,
-                "opponent_ids": {2, 4},
-                "white_games": 1,
-                "black_games": 1,
-                "colors": ["W", "B"],
-            },
-            {
-                "entry_id": 4,
-                "name": "Delta",
-                "score": 2.0,
-                "seed_rating": 1890,
-                "opponent_ids": {1, 3},
-                "white_games": 1,
-                "black_games": 1,
-                "colors": ["B", "W"],
-            },
-        ]
-
-        pairs = _pair_group(group)
-        paired_ids = {frozenset((white["entry_id"], black["entry_id"])) for white, black in pairs}
-        self.assertEqual(paired_ids, {frozenset((1, 3)), frozenset((2, 4))})
-
-    def test_pair_group_avoids_same_absolute_colour_preferences(self):
-        group = [
-            {
-                "entry_id": 1,
-                "name": "Alpha",
-                "score": 1.0,
-                "seed_rating": 2100,
-                "opponent_ids": set(),
-                "white_games": 2,
-                "black_games": 0,
-                "colors": ["W", "W"],
-                "color_rounds": [(1, "W"), (2, "W")],
-            },
-            {
-                "entry_id": 2,
-                "name": "Bravo",
-                "score": 1.0,
-                "seed_rating": 2090,
-                "opponent_ids": set(),
-                "white_games": 0,
-                "black_games": 2,
-                "colors": ["B", "B"],
-                "color_rounds": [(1, "B"), (2, "B")],
-            },
-            {
-                "entry_id": 3,
-                "name": "Charlie",
-                "score": 1.0,
-                "seed_rating": 1900,
-                "opponent_ids": set(),
-                "white_games": 2,
-                "black_games": 0,
-                "colors": ["W", "W"],
-                "color_rounds": [(1, "W"), (2, "W")],
-            },
-            {
-                "entry_id": 4,
-                "name": "Delta",
-                "score": 1.0,
-                "seed_rating": 1890,
-                "opponent_ids": set(),
-                "white_games": 0,
-                "black_games": 2,
-                "colors": ["B", "B"],
-                "color_rounds": [(1, "B"), (2, "B")],
-            },
-        ]
-
-        pairs = _pair_group(group)
-        paired_ids = {frozenset((white["entry_id"], black["entry_id"])) for white, black in pairs}
-        self.assertEqual(paired_ids, {frozenset((1, 4)), frozenset((2, 3))})
-
-    def test_pair_group_corrects_absolute_colour_streaks(self):
-        group = [
-            {
-                "entry_id": 1,
-                "name": "Alpha",
-                "score": 1.0,
-                "seed_rating": 2100,
-                "opponent_ids": set(),
-                "white_games": 2,
-                "black_games": 0,
-                "colors": ["W", "W"],
-                "color_rounds": [(1, "W"), (2, "W")],
-            },
-            {
-                "entry_id": 2,
-                "name": "Bravo",
-                "score": 1.0,
-                "seed_rating": 2000,
-                "opponent_ids": set(),
-                "white_games": 0,
-                "black_games": 2,
-                "colors": ["B", "B"],
-                "color_rounds": [(1, "B"), (2, "B")],
-            },
-        ]
-
-        pairs = _pair_group(group)
-        self.assertEqual(len(pairs), 1)
-        white, black = pairs[0]
-        self.assertEqual(white["entry_id"], 2)
-        self.assertEqual(black["entry_id"], 1)
 
     def test_generate_swiss_pairings_does_not_repeat_pairing_allocated_bye(self):
         with self.app.app_context():

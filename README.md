@@ -39,6 +39,12 @@ CHESS_INSTANCE_PATH=local-test-instance uv run flask --app flaskr run --debug
 
 The copied test instance uses the admin password `admin`.
 
+## Registration scheduling and rounds
+
+Registration opening times use **Europe/Zurich** (CET/CEST), independently of the server or browser timezone. New schedules include the UTC offset; existing timezone-free schedules are interpreted as Zurich time. Times skipped when clocks move forward are rejected. When clocks move back, a repeated local time refers to its first occurrence.
+
+To change the number of rounds, open a tournament's **Tournament settings**. Choose 1–15 rounds; rounds with existing pairings cannot be removed, and finished tournaments keep their round count. Existing results and round availability are preserved.
+
 ## Email Setup
 
 Registration and waitlist confirmation emails are disabled until you configure SMTP.
@@ -88,3 +94,15 @@ When creating a tournament, or under **Tournament settings**, enable **Exclude f
 **Team tournament (unrated)** lets entrants register a team name, member email addresses, and average Elo, or register alone with their name, email, and optional approximate Elo. Set the number of members per team in tournament settings (default: 2). Team registrations and admin assignments must match this size. Teams compete as single entries with the usual round, pairing, and result controls. Solo registrations are confirmed immediately and receive a confirmation email explaining that they will be paired at the tournament. The registered count includes each unassigned solo as 1 / team size (half a team by default). Assigning these members to a team preserves their confirmed places without counting them twice. The registration limit applies to new full teams; solo registrations remain open even when that limit is reached.
 
 Admins select solo registrations under **Awaiting team** and assign them to a new named team or an incomplete existing team that has not been paired. Elo estimates are shown in the admin alongside registrations. A team's average Elo is used for seeding, without affecting player ratings or rating-based prizes. Teams formed from solo registrations get an average when every member provides an estimate; otherwise they use the default seed of 1500. Member emails and registration answers are visible only to admins. Team format can only be changed before registrations or pairings exist, and team size changes must remain consistent with registered teams. Existing databases are migrated automatically at startup.
+
+## Pairing and result controls
+
+Individual tournaments use the FIDE Dutch rules effective February 2026. Team tournaments use the separate FIDE Swiss Team system with Type A colour preferences. The pairing adapter uses pinned `gacrux==1.10.62`; run `uv sync` when updating this checkout. Pairings consider the complete prior history, ordered bracket criteria, floats, played colours and bye eligibility. Board order follows General Handling article 3.6.
+
+The existing club conventions remain: rating/name seeding, White as the initial colour, and one result per team encounter scored 1 / 0.5 / 0 with a full-point bye. Individual board scores and secondary team scores are not collected. This is not a claim of FIDE software certification.
+
+Admins choose **White wins**, **Draw**, or **Black wins**. **Forfeit / clear** offers a win by forfeit for either side, both forfeiting, or clearing the result. Forfeits award the indicated points but do not count as played colours, played opponents, or rated games. A full-point forfeit winner cannot receive a later pairing-allocated bye.
+
+Both automatic and manual pairing enforce the planned round limit and require valid results in every preceding round. The latest round can be corrected until another round is paired; older rounds and finished tournaments are locked. Intentional manual opponent overrides remain available in an editable round. Autosaves run in order, and round generation and finishing wait for pending result saves.
+
+Regression tests: `uv run python -m unittest discover -s tests`. The Dutch reference fixture was checked with [BBP Pairings 6.0.0](https://github.com/BieremaBoyzProgramming/bbpPairings/releases/tag/v6.0.0); the team and colour cases target the [2026 Dutch](https://handbook.fide.com/chapter/C0403202602), [Swiss Team](https://handbook.fide.com/chapter/SwissTeamPairingSystem202602), and [General Handling](https://handbook.fide.com/chapter/GeneralHandlingRulesForSwissTournaments202602) rules.

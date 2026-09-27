@@ -1,0 +1,42 @@
+{
+  "team_colour_restriction": {
+    "expected": "one match between the two remaining teams",
+    "actual_boards": []
+  },
+  "forfeit_handling": {
+    "bye_given_to_forfeit_winner": true,
+    "forfeit_added_to_colour_history": [
+      "W"
+    ],
+    "forfeit_opponent_added_to_played_opponents": true
+  },
+  "skip_unplayed_round": {
+    "http_status": 302,
+    "round_one_boards": 0,
+    "round_two_boards": 2
+  },
+  "save_beyond_round_limit": {
+    "planned": 3,
+    "saved_round": 99,
+    "boards": 2
+  },
+  "finished_tournament_mutable": {
+    "status": "completed",
+    "changed_result": "0-1"
+  },
+  "invalid_result_completes_round": {
+    "stored_result": "BANANA",
+    "round_complete": true,
+    "next_round_boards": 2
+  },
+  "finished_standings_stale": {
+    "stored_scores": {
+      "1": 1.0,
+      "2": 0.0
+    },
+    "scores_from_results": {
+      "2": 1.0,
+      "1": 0.0
+    }
+  }
+}
