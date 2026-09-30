@@ -15,7 +15,7 @@
               <tr>
                 <td><input type="checkbox" name="member_id" value="{{ member.id }}" aria-label="Select {{ member.name }}" {% if tournament.status == 'completed' %}disabled{% endif %}></td>
                 <td>{{ member.name }}</td>
-                <td>{{ member.email }}</td>
+                <td>{{ member.email or '-' }}</td>
                 <td>{{ member.declared_rating if member.declared_rating is not none else '-' }}</td>
                 <td>{% for answer in team_member_answers.get(member.id, []) %}<div>{{ answer.label }}: {{ answer.value }}</div>{% endfor %}</td>
                 <td>

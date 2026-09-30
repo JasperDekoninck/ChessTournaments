@@ -71,7 +71,7 @@ def registration_waitlist_position(db, tournament, *, solo: bool = False):
     return None
 
 
-def create_team_entry(db, tournament, name: str, emails: list[str], answers: str | None, source: str, declared_rating: int | None, *, already_confirmed: bool = False):
+def create_team_entry(db, tournament, name: str, emails: list[str | None], answers: str | None, source: str, declared_rating: int | None, *, already_confirmed: bool = False):
     validate_team_name(db, tournament["id"], name)
     waitlist_position = None if already_confirmed else registration_waitlist_position(db, tournament)
     order = db.execute(
@@ -85,7 +85,7 @@ def create_team_entry(db, tournament, name: str, emails: list[str], answers: str
           is_active, registration_source, registration_order, registration_answers_json, waitlist_position
         ) VALUES (?, ?, ?, ?, ?, 'unknown', ?, ?, ?, ?, ?)
         """,
-        (tournament["id"], name, emails[0], declared_rating, declared_rating if declared_rating is not None else 1500,
+        (tournament["id"], name, next((email for email in emails if email), None), declared_rating, declared_rating if declared_rating is not None else 1500,
          int(source == "admin" and waitlist_position is None), source, order, answers, waitlist_position),
     )
     return cursor.lastrowid, waitlist_position
@@ -94,11 +94,17 @@ def create_team_entry(db, tournament, name: str, emails: list[str], answers: str
 def register_team_members(db, tournament, *, name: str, emails: list[str], solo: bool, answers: str | None, source: str, declared_rating: int | None):
     if not name:
         raise ValueError("Your name is required." if solo else "Team name is required.")
+    if source == "admin":
+        required_members = 1 if solo else tournament["team_size"]
+        if len(emails) > required_members:
+            raise ValueError(f"Enter at most {required_members} member email addresses.")
+        # Keep a record for every member even when the admin has no contact details.
+        emails = [*emails, *([None] * (required_members - len(emails)))]
     if solo and len(emails) != 1:
         raise ValueError("Solo registration needs exactly one email address.")
     if not solo and len(emails) != tournament["team_size"]:
         raise ValueError(f"A team needs exactly {tournament['team_size']} member email addresses, or you can register alone.")
-    existing_emails = {row["email"].lower() for row in team_members(db, tournament["id"])}
+    existing_emails = {row["email"].lower() for row in team_members(db, tournament["id"]) if row["email"]}
     if existing_emails.intersection(emails):
         raise ValueError("A member with one of these email addresses is already registered for this tournament.")
     entry_id, waitlist_position = (None, registration_waitlist_position(db, tournament, solo=True)) if solo else create_team_entry(db, tournament, name, emails, answers, source, declared_rating)

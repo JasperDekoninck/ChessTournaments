@@ -11,8 +11,8 @@
     <input type="text" name="team_name" required>
   </label>
   <label>
-    Member email addresses ({{ tournament.team_size }} members)
-    <textarea name="member_emails" rows="3" placeholder="alex@example.com, sam@example.com" required></textarea>
+    Member email addresses ({{ 'optional, up to ' if emails_optional|default(false) else '' }}{{ tournament.team_size }} members)
+    <textarea name="member_emails" rows="3" placeholder="alex@example.com, sam@example.com" {% if not emails_optional|default(false) %}required{% endif %}></textarea>
   </label>
   <label>
     Average Elo
@@ -25,8 +25,8 @@
     <input type="text" name="name" autocomplete="name" required disabled>
   </label>
   <label>
-    Your email
-    <input type="email" name="email" autocomplete="email" required disabled>
+    Your email{{ ' (optional)' if emails_optional|default(false) else '' }}
+    <input type="email" name="email" autocomplete="email" {% if not emails_optional|default(false) %}required{% endif %} disabled>
   </label>
   <label>
     Approximate Elo (optional)

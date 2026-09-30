@@ -872,7 +872,8 @@ def _submit_team_registration(tournament, admin: bool = False):
             raise ValueError("Choose team or solo registration.")
         if error:
             raise ValueError(error)
-        emails = parse_member_emails(request.form.get("email" if solo else "member_emails") or "")
+        email_text = (request.form.get("email" if solo else "member_emails") or "").strip()
+        emails = [] if admin and not email_text else parse_member_emails(email_text)
         declared_rating = parse_elo(request.form.get("approximate_elo" if solo else "average_elo"), required=not solo)
         db.execute("BEGIN IMMEDIATE")
         entry_id, waitlist_position = register_team_members(
@@ -1548,9 +1549,17 @@ def toggle_entry(slug: str, entry_id: int):
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
 
+def _waitlist_confirmation_should_email() -> bool:
+    value = request.form.get("send_email", "1")
+    if value not in {"0", "1"}:
+        abort(400)
+    return value == "1"
+
+
 @bp.post("/admin/t/<slug>/entries/<int:entry_id>/confirm")
 @login_required
 def confirm_waitlist_entry(slug: str, entry_id: int):
+    email_confirmation = _waitlist_confirmation_should_email()
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
     tournament = _tournament_or_404(slug)
@@ -1575,6 +1584,9 @@ def confirm_waitlist_entry(slug: str, entry_id: int):
         (entry_id,),
     )
     compact_waitlist(db, tournament["id"])
+    if not email_confirmation:
+        flash_success(f"{entry['imported_name']} was confirmed. No email was sent.")
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
     recipients = [member["email"] for member in team_members(db, tournament["id"]) if member["entry_id"] == entry_id] if tournament["is_team"] else [entry["imported_email"]]
     deliveries = [
         send_waitlist_confirmation_email(tournament, {"name": entry["imported_name"], "email": email})
@@ -1614,7 +1626,7 @@ def set_member_presence(slug: str, member_id: int):
     return redirect(url_for("web.admin_tournament_detail", slug=slug, _anchor="awaiting-team"))
 
 
-def _set_solo_waitlist(slug: str, member_id: int, *, waiting: bool):
+def _set_solo_waitlist(slug: str, member_id: int, *, waiting: bool, email_confirmation: bool = True):
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
     tournament = _tournament_or_404(slug)
@@ -1636,6 +1648,9 @@ def _set_solo_waitlist(slug: str, member_id: int, *, waiting: bool):
     else:
         compact_waitlist(db, tournament["id"])
     recipient = {"name": member["name"] or member["email"], "email": member["email"]}
+    if not waiting and not email_confirmation:
+        flash_success(f"{recipient['name']} was confirmed and is awaiting a team. No email was sent.")
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
     if waiting:
         sent, error = send_registration_email(tournament, recipient, position, solo=True)
         action = f"moved to the waiting list in position {position}"
@@ -1654,13 +1669,66 @@ def _set_solo_waitlist(slug: str, member_id: int, *, waiting: bool):
 @bp.post("/admin/t/<slug>/members/<int:member_id>/confirm")
 @login_required
 def confirm_waitlist_member(slug: str, member_id: int):
-    return _set_solo_waitlist(slug, member_id, waiting=False)
+    return _set_solo_waitlist(slug, member_id, waiting=False, email_confirmation=_waitlist_confirmation_should_email())
 
 
 @bp.post("/admin/t/<slug>/members/<int:member_id>/waitlist")
 @login_required
 def waitlist_solo_member(slug: str, member_id: int):
     return _set_solo_waitlist(slug, member_id, waiting=True)
+
+
+def _remove_waitlist_registration(slug: str, registration_id: int, *, solo: bool):
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    tournament = _tournament_or_404(slug)
+    if tournament["is_historical"] or tournament["status"] == "completed" or (solo and not tournament["is_team"]):
+        abort(400)
+    if solo:
+        registration = db.execute(
+            "SELECT id, name, waitlist_position FROM team_member WHERE id = ? AND tournament_id = ? AND entry_id IS NULL",
+            (registration_id, tournament["id"]),
+        ).fetchone()
+    else:
+        registration = db.execute(
+            "SELECT id, imported_name AS name, waitlist_position FROM tournament_entry WHERE id = ? AND tournament_id = ?",
+            (registration_id, tournament["id"]),
+        ).fetchone()
+    if registration is None:
+        abort(404)
+    # A stale waiting-list page must not delete someone who has since been confirmed.
+    if registration["waitlist_position"] is None:
+        db.rollback()
+        flash_warning("Only waiting-list registrations can be removed here. This registration is already confirmed.")
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    if not solo and db.execute(
+        "SELECT 1 FROM pairing WHERE white_entry_id = ? OR black_entry_id = ?",
+        (registration_id, registration_id),
+    ).fetchone():
+        db.rollback()
+        flash_error("This registration already has game pairings and cannot be removed.")
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    if solo:
+        db.execute("DELETE FROM team_member WHERE id = ? AND tournament_id = ?", (registration_id, tournament["id"]))
+    else:
+        # Team members and availability belong to this registration and cascade;
+        # the global player record and registrations in other tournaments remain.
+        db.execute("DELETE FROM tournament_entry WHERE id = ? AND tournament_id = ?", (registration_id, tournament["id"]))
+    compact_waitlist(db, tournament["id"])
+    flash_success(f"{registration['name']} was removed from this tournament's waiting list.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/members/<int:member_id>/remove-waitlist")
+@login_required
+def remove_waitlist_member(slug: str, member_id: int):
+    return _remove_waitlist_registration(slug, member_id, solo=True)
+
+
+@bp.post("/admin/t/<slug>/entries/<int:entry_id>/remove-waitlist")
+@login_required
+def remove_waitlist_entry(slug: str, entry_id: int):
+    return _remove_waitlist_registration(slug, entry_id, solo=False)
 
 
 @bp.post("/admin/t/<slug>/entries/<int:entry_id>/availability")

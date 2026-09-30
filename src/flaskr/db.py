@@ -150,6 +150,7 @@ def migrate_db(db):
         db.execute("CREATE INDEX IF NOT EXISTS idx_pairing_black_entry ON pairing(black_entry_id)")
 
     _allow_team_entries(db)
+    _allow_team_members_without_email(db)
 
 
 def _allow_team_entries(db):
@@ -203,6 +204,51 @@ def _allow_team_entries(db):
         raise
     finally:
         db.execute("PRAGMA foreign_keys = ON")
+
+
+def _allow_team_members_without_email(db):
+    columns = db.execute("PRAGMA table_info(team_member)").fetchall()
+    if not any(row["name"] == "email" and row["notnull"] for row in columns):
+        return
+    db.commit()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        # A different worker may already have migrated while we waited for the lock.
+        columns = db.execute("PRAGMA table_info(team_member)").fetchall()
+        if not any(row["name"] == "email" and row["notnull"] for row in columns):
+            db.commit()
+            return
+        sequence = db.execute("SELECT seq FROM sqlite_sequence WHERE name = 'team_member'").fetchone()
+        db.execute(
+            """
+            CREATE TABLE team_member_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              tournament_id INTEGER NOT NULL REFERENCES tournament(id) ON DELETE CASCADE,
+              entry_id INTEGER REFERENCES tournament_entry(id) ON DELETE CASCADE,
+              name TEXT,
+              email TEXT COLLATE NOCASE,
+              is_present INTEGER NOT NULL DEFAULT 0,
+              waitlist_position INTEGER,
+              declared_rating INTEGER,
+              registration_answers_json TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE (tournament_id, email)
+            )
+            """
+        )
+        column_list = ", ".join(_quote_identifier(row["name"], "column name") for row in columns)
+        db.execute(f"INSERT INTO team_member_new ({column_list}) SELECT {column_list} FROM team_member")
+        db.execute("DROP TABLE team_member")
+        db.execute("ALTER TABLE team_member_new RENAME TO team_member")
+        if sequence is not None:
+            db.execute("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'team_member'", (sequence["seq"],))
+        db.execute("CREATE INDEX idx_team_member_entry ON team_member(entry_id)")
+        if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise sqlite3.IntegrityError("Team member migration failed its foreign key check.")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 @click.command("init-db")

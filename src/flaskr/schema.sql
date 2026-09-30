@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS team_member (
   tournament_id INTEGER NOT NULL REFERENCES tournament(id) ON DELETE CASCADE,
   entry_id INTEGER REFERENCES tournament_entry(id) ON DELETE CASCADE,
   name TEXT,
-  email TEXT NOT NULL COLLATE NOCASE,
+  email TEXT COLLATE NOCASE,
   is_present INTEGER NOT NULL DEFAULT 0,
   waitlist_position INTEGER,
   declared_rating INTEGER,

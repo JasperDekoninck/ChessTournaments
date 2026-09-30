@@ -352,7 +352,9 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {% if tournament.is_team %}
         <h3>Add registration</h3>
-        {% include "_team_registration_fields.html" %}
+        {% with emails_optional=true %}
+          {% include "_team_registration_fields.html" %}
+        {% endwith %}
       {% else %}
       <h3>Add player</h3>
       <label class="autocomplete-field">
