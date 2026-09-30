@@ -1296,16 +1296,14 @@ tr.is-waitlist .waitlist-note {
   margin-bottom: 1.75rem;
 }
 
+/* Keep the projected round and standings tables dense without shrinking text. */
 .public-boards-table th,
-.public-boards-table td {
-  padding-top: 0.85rem;
-  padding-bottom: 0.85rem;
-}
-
+.public-boards-table td,
 .public-standings-table th,
 .public-standings-table td {
-  padding-top: 0.85rem;
-  padding-bottom: 0.85rem;
+  padding-top: 0.125rem;
+  padding-bottom: 0.125rem;
+  line-height: 1.2;
 }
 
 .public-boards-table .public-result-col {
@@ -1525,6 +1523,18 @@ tr.is-waitlist .waitlist-note {
   background: #f6edce;
   color: #795710;
   border-radius: 4px;
+}
+
+.public-boards-table .result-label {
+  padding-top: 0;
+  padding-bottom: 0;
+  vertical-align: middle;
+}
+
+.public-standings-table .rank-number {
+  width: 1.5rem;
+  height: 1.125rem;
+  vertical-align: middle;
 }
 
 .score-value {
