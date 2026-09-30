@@ -1,4 +1,4 @@
-<section class="section">
+<section class="section" id="awaiting-team">
   {% set unassigned = team_members|selectattr('entry_id', 'none')|selectattr('waitlist_position', 'none')|list %}
   <div class="section-heading">
     <h2>Awaiting team</h2>
@@ -9,7 +9,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Approximate Elo</th><th>Registration details</th><th>Status</th></tr></thead>
+          <thead><tr><th>Select</th><th>Name</th><th>Email</th><th>Approximate Elo</th><th>Registration details</th><th>Present</th><th>Actions</th></tr></thead>
           <tbody>
             {% for member in unassigned %}
               <tr>
@@ -19,7 +19,9 @@
                 <td>{{ member.declared_rating if member.declared_rating is not none else '-' }}</td>
                 <td>{% for answer in team_member_answers.get(member.id, []) %}<div>{{ answer.label }}: {{ answer.value }}</div>{% endfor %}</td>
                 <td>
-                  <span class="status-pill status-on">Confirmed</span>
+                  <input type="checkbox" name="is_present" value="1" form="presence-member-{{ member.id }}" data-member-presence aria-label="{{ member.name }} is present" {% if member.is_present %}checked{% endif %} {% if tournament.is_historical or tournament.status == 'completed' %}disabled{% endif %}>
+                </td>
+                <td>
                   {% if not tournament.is_historical and tournament.status != 'completed' %}
                     <button type="submit" form="waitlist-solo-{{ member.id }}" class="secondary tiny">Move to waiting list + email</button>
                   {% endif %}
@@ -50,6 +52,9 @@
     </form>
     {% if not tournament.is_historical and tournament.status != 'completed' %}
       {% for member in unassigned %}
+        <form id="presence-member-{{ member.id }}" method="post" action="{{ url_for('web.set_member_presence', slug=tournament.slug, member_id=member.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        </form>
         <form id="waitlist-solo-{{ member.id }}" method="post" action="{{ url_for('web.waitlist_solo_member', slug=tournament.slug, member_id=member.id) }}" data-confirm="Move {{ member.name }} to the waiting list and email them? Their confirmed place will be released.">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         </form>

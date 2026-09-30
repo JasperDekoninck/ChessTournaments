@@ -10,6 +10,7 @@ const ready = () => {
   initPlayerSearch();
   initPlayerSorting();
   initEntryToggles();
+  initMemberPresence();
   initAvailabilityToggles();
   initModals();
 };
@@ -816,6 +817,39 @@ const initEntryToggles = () => {
         applyEntryState(payload.entry);
       }
       (payload.waitlist || []).forEach(applyEntryState);
+    });
+  });
+};
+
+const initMemberPresence = () => {
+  document.querySelectorAll("[data-member-presence]").forEach((checkbox) => {
+    if (checkbox.disabled || !checkbox.form || checkbox.dataset.boundPresence === "1") {
+      return;
+    }
+    checkbox.dataset.boundPresence = "1";
+    checkbox.addEventListener("change", async () => {
+      const previousValue = !checkbox.checked;
+      const form = checkbox.form;
+      const data = new FormData(form);
+      data.set("is_present", checkbox.checked ? "1" : "0");
+      checkbox.disabled = true;
+      try {
+        const response = await fetch(form.action, {
+          method: "POST",
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          body: data,
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error("Attendance could not be saved.");
+        }
+        checkbox.checked = payload.is_present;
+      } catch (error) {
+        checkbox.checked = previousValue;
+        window.alert("Attendance could not be saved. Please try again.");
+      } finally {
+        checkbox.disabled = false;
+      }
     });
   });
 };

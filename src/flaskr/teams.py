@@ -163,3 +163,48 @@ def assign_team_members(db, tournament, member_ids: list[int], name: str, existi
         )
     db.executemany("UPDATE team_member SET entry_id = ? WHERE id = ?", [(entry_id, row["id"]) for row in members])
     return entry_id
+
+
+def team_created_from_solos(entry, members) -> bool:
+    # Solo registrations retain their individual names after assignment; members
+    # registered together as a team have no individual name in this data model.
+    return (
+        entry["player_id"] is None
+        and entry["registration_source"] == "admin"
+        and bool(members)
+        and all(member["name"] for member in members)
+    )
+
+
+def unpair_team_members(db, tournament, entry_id: int):
+    if not tournament["is_team"] or tournament["is_historical"] or tournament["status"] == "completed":
+        raise ValueError("Teams can only be unpaired in an unfinished team tournament.")
+    entry = db.execute(
+        "SELECT * FROM tournament_entry WHERE id = ? AND tournament_id = ?",
+        (entry_id, tournament["id"]),
+    ).fetchone()
+    if entry is None:
+        raise ValueError("Choose a team from this tournament.")
+    members = db.execute(
+        "SELECT * FROM team_member WHERE entry_id = ? AND tournament_id = ?",
+        (entry_id, tournament["id"]),
+    ).fetchall()
+    if not team_created_from_solos(entry, members):
+        raise ValueError("Only teams created from individual registrations can be unpaired.")
+    if entry["waitlist_position"] is not None or any(member["waitlist_position"] is not None for member in members):
+        raise ValueError("Confirm waiting-list registrations before unpairing their team.")
+    if len(members) != tournament["team_size"]:
+        raise ValueError("The team must have its full set of members before it can be unpaired.")
+    if db.execute(
+        "SELECT 1 FROM pairing WHERE white_entry_id = ? OR black_entry_id = ?",
+        (entry_id, entry_id),
+    ).fetchone():
+        raise ValueError("This team already has game pairings and cannot be unpaired.")
+    # Detach first: deleting an entry otherwise cascades to its registrations.
+    # The caller holds a write transaction so both steps succeed together.
+    db.execute(
+        "UPDATE team_member SET entry_id = NULL WHERE entry_id = ? AND tournament_id = ?",
+        (entry_id, tournament["id"]),
+    )
+    db.execute("DELETE FROM tournament_entry WHERE id = ? AND tournament_id = ?", (entry_id, tournament["id"]))
+    return entry["imported_name"]

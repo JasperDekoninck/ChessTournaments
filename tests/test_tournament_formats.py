@@ -172,6 +172,153 @@ class TournamentFormatsTestCase(unittest.TestCase):
         self.assertNotIn(b"Rating", response.data)
         self.assertNotIn(b"@example.com", response.data)
 
+    def assign_solos(self, slug, name="Assigned Team"):
+        members = self.rows(
+            "SELECT id FROM team_member WHERE tournament_id = (SELECT id FROM tournament WHERE slug = ?) AND entry_id IS NULL",
+            (slug,),
+        )
+        response = self.client.post(f"/admin/t/{slug}/teams/assign", data={
+            "team_name": name, "member_id": [str(member["id"]) for member in members],
+        }, follow_redirects=True)
+        self.assertIn(b"Team assignment saved", response.data)
+        return self.rows("SELECT * FROM tournament_entry WHERE imported_name = ? AND tournament_id = (SELECT id FROM tournament WHERE slug = ?)", (name, slug))[0]
+
+    def test_unpair_restores_solo_details_presence_and_places_without_affecting_waitlist(self):
+        for size in (2, 3):
+            with self.subTest(team_size=size):
+                slug = self.create_tournament(f"Unpair Cup {size}", capacity="1", team_size=str(size))
+                self.client.post(f"/admin/t/{slug}/registration", data={
+                    "registration_enabled": "1", "registration_opens_at": "2020-01-01T12:00", "max_registrations": "1",
+                    "registration_field_type": "text", "registration_field_label": "Department", "registration_field_options": "",
+                })
+                for number in range(size):
+                    self.register_solo(slug, f"Player {number}", f"player{number}@example.com", approximate_elo=str(1400 + number * 100), registration_field_0=f"Department {number}")
+                original_members = self.rows("SELECT * FROM team_member WHERE tournament_id = (SELECT id FROM tournament WHERE slug = ?) ORDER BY id", (slug,))
+                self.client.post(f"/admin/t/{slug}/members/{original_members[0]['id']}/presence", data={"is_present": "1"})
+                original_members[0]["is_present"] = 1
+                entry = self.assign_solos(slug)
+                self.register_team(slug, "Waiting Team", ",".join(f"waiting{number}@example.com" for number in range(size)), registration_field_0="Waiting department")
+                waiting_members = self.rows("SELECT * FROM team_member WHERE tournament_id = ? AND entry_id != ? ORDER BY id", (entry["tournament_id"], entry["id"]))
+                response = self.client.get(f"/admin/t/{slug}")
+                self.assertIn(f'/teams/{entry["id"]}/unpair'.encode(), response.data)
+                self.app.extensions["mail_outbox"].clear()
+                response = self.client.post(f"/admin/t/{slug}/teams/{entry['id']}/unpair")
+                self.assertTrue(response.location.endswith("#awaiting-team"))
+                page = self.client.get(response.location).data
+                self.assertIn(f"{size} solo registrations".encode(), page)
+                self.assertIn(b"Assigned Team was unpaired", page)
+                restored = self.rows("SELECT * FROM team_member WHERE tournament_id = ? AND entry_id IS NULL ORDER BY id", (entry["tournament_id"],))
+                self.assertEqual(restored, original_members)
+                self.assertEqual(self.rows("SELECT * FROM team_member WHERE tournament_id = ? AND entry_id IS NOT NULL ORDER BY id", (entry["tournament_id"],)), waiting_members)
+                self.assertEqual(self.rows("SELECT * FROM entry_round_status WHERE entry_id = ?", (entry["id"],)), [])
+                self.assertEqual(self.rows("SELECT * FROM tournament_entry WHERE id = ?", (entry["id"],)), [])
+                self.assertEqual(self.counts(slug), {"confirmed_count": 1, "waitlist_count": 1})
+                self.assertEqual(self.app.extensions["mail_outbox"], [])
+                # Re-forming a team uses the existing confirmed places, even with a queue.
+                replacement = self.assign_solos(slug)
+                self.assertNotEqual(replacement["id"], entry["id"])
+                self.assertIsNone(replacement["waitlist_position"])
+                self.assertEqual(self.counts(slug), {"confirmed_count": 1, "waitlist_count": 1})
+
+    def test_unpair_rejects_game_pairings_in_either_colour_and_byes(self):
+        slug = self.create_tournament()
+        self.register_solo(slug)
+        self.register_solo(slug, "Morgan", "morgan@example.com")
+        entry = self.assign_solos(slug)
+        self.register_team(slug)
+        opponent = self.rows("SELECT * FROM tournament_entry WHERE id != ?", (entry["id"],))[0]
+        members = self.rows("SELECT * FROM team_member ORDER BY id")
+        for white, black, result in ((entry["id"], opponent["id"], None), (opponent["id"], entry["id"], "1-0"), (entry["id"], None, "BYE")):
+            with self.subTest(white=white, black=black, result=result):
+                with self.app.app_context():
+                    db = get_db()
+                    db.execute("DELETE FROM pairing")
+                    db.execute("INSERT INTO pairing (tournament_id, round_no, board_no, white_entry_id, black_entry_id, result_code) VALUES (?, 1, 1, ?, ?, ?)", (entry["tournament_id"], white, black, result))
+                    db.commit()
+                pairings = self.rows("SELECT * FROM pairing")
+                response = self.client.post(f"/admin/t/{slug}/teams/{entry['id']}/unpair", follow_redirects=True)
+                self.assertIn(b"already has game pairings and cannot be unpaired", response.data)
+                self.assertIn(b'disabled>Unpair team</button>', response.data)
+                self.assertEqual(self.rows("SELECT * FROM pairing"), pairings)
+                self.assertEqual(self.rows("SELECT * FROM team_member ORDER BY id"), members)
+                self.assertEqual(self.rows("SELECT * FROM tournament_entry WHERE id = ?", (entry["id"],)), [entry])
+
+    def test_unpair_rejects_registered_teams_wrong_tournament_and_finished_events(self):
+        slug = self.create_tournament()
+        self.register_team(slug)
+        registered = self.rows("SELECT * FROM tournament_entry")[0]
+        response = self.client.post(f"/admin/t/{slug}/teams/{registered['id']}/unpair", follow_redirects=True)
+        self.assertIn(b"Only teams created from individual registrations", response.data)
+        self.assertEqual(len(self.rows("SELECT * FROM team_member")), 2)
+        self.register_solo(slug)
+        self.register_solo(slug, "Morgan", "morgan@example.com")
+        entry = self.assign_solos(slug)
+        members = self.rows("SELECT * FROM team_member ORDER BY id")
+        other = self.create_tournament("Other Cup")
+        response = self.client.post(f"/admin/t/{other}/teams/{entry['id']}/unpair", follow_redirects=True)
+        self.assertIn(b"Choose a team from this tournament", response.data)
+        for status, historical in (("completed", 0), ("draft", 1)):
+            with self.app.app_context():
+                db = get_db()
+                db.execute("UPDATE tournament SET status = ?, is_historical = ? WHERE id = ?", (status, historical, entry["tournament_id"]))
+                db.commit()
+            response = self.client.post(f"/admin/t/{slug}/teams/{entry['id']}/unpair", follow_redirects=True)
+            self.assertIn(b"unfinished team tournament", response.data)
+            self.assertNotIn(b">Unpair team</button>", response.data)
+        self.assertEqual(self.rows("SELECT * FROM team_member ORDER BY id"), members)
+        self.assertEqual(self.client.get(f"/admin/t/{slug}/teams/{entry['id']}/unpair").status_code, 405)
+        with self.client.session_transaction() as session:
+            session.clear()
+        self.assertEqual(self.client.post(f"/admin/t/{slug}/teams/{entry['id']}/unpair").status_code, 302)
+        self.assertEqual(self.rows("SELECT * FROM tournament_entry WHERE id = ?", (entry["id"],)), [entry])
+
+    def test_failed_unpair_rolls_back_detaching_members(self):
+        slug = self.create_tournament()
+        self.register_solo(slug)
+        self.register_solo(slug, "Morgan", "morgan@example.com")
+        entry = self.assign_solos(slug)
+        members = self.rows("SELECT * FROM team_member ORDER BY id")
+        with self.app.app_context():
+            db = get_db()
+            db.execute("CREATE TRIGGER block_team_delete BEFORE DELETE ON tournament_entry BEGIN SELECT RAISE(ABORT, 'blocked for test'); END")
+            db.commit()
+        response = self.client.post(f"/admin/t/{slug}/teams/{entry['id']}/unpair", follow_redirects=True)
+        self.assertIn(b"This team could not be unpaired", response.data)
+        self.assertEqual(self.rows("SELECT * FROM team_member ORDER BY id"), members)
+        self.assertEqual(self.rows("SELECT * FROM tournament_entry WHERE id = ?", (entry["id"],)), [entry])
+
+    def test_member_presence_is_saved_without_changing_registration(self):
+        slug = self.create_tournament()
+        self.register_solo(slug)
+        member = self.rows("SELECT * FROM team_member")[0]
+        self.assertEqual(member["is_present"], 0)
+        for value in ("1", "1", "0"):
+            response = self.client.post(f"/admin/t/{slug}/members/{member['id']}/presence", data={"is_present": value}, headers={"X-Requested-With": "XMLHttpRequest"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json, {"ok": True, "is_present": value == "1"})
+            self.assertEqual(self.rows("SELECT * FROM team_member"), [{**member, "is_present": int(value)}])
+        self.assertEqual(self.counts(slug), {"confirmed_count": 0.5, "waitlist_count": 0})
+        response = self.client.get(f"/admin/t/{slug}")
+        self.assertIn(b"<th>Present</th>", response.data)
+        self.assertIn(b"data-member-presence", response.data)
+        self.assertNotIn(b'<span class="status-pill status-on">Confirmed</span>', response.data)
+        self.assertIn(b"Move to waiting list + email", response.data)
+        other = self.create_tournament("Other Cup")
+        self.assertEqual(self.client.post(f"/admin/t/{other}/members/{member['id']}/presence", data={"is_present": "1"}).status_code, 404)
+        self.assertEqual(self.client.post(f"/admin/t/{slug}/members/{member['id']}/presence", data={"is_present": "invalid"}).status_code, 400)
+        self.app.config["TESTING"] = False
+        self.assertEqual(self.client.post(f"/admin/t/{slug}/members/{member['id']}/presence", data={"is_present": "1"}).status_code, 400)
+        self.app.config["TESTING"] = True
+        with self.app.app_context():
+            db = get_db()
+            db.execute("UPDATE tournament SET status = 'completed' WHERE slug = ?", (slug,))
+            db.commit()
+        self.assertEqual(self.client.post(f"/admin/t/{slug}/members/{member['id']}/presence", data={"is_present": "1"}).status_code, 400)
+        with self.client.session_transaction() as session:
+            session.clear()
+        self.assertEqual(self.client.post(f"/admin/t/{slug}/members/{member['id']}/presence", data={"is_present": "1"}).status_code, 302)
+        self.assertEqual(self.rows("SELECT * FROM team_member"), [member])
+
     def test_team_capacity_and_waitlist_confirmation_reach_every_member(self):
         slug = self.create_tournament(capacity="1")
         self.register_team(slug)
@@ -633,7 +780,7 @@ class TournamentFormatsTestCase(unittest.TestCase):
 class TournamentMigrationTestCase(unittest.TestCase):
     def test_existing_team_waitlist_and_confirmed_solos_survive_upgrade(self):
         schema = (Path(__file__).parents[1] / "src/flaskr/schema.sql").read_text()
-        legacy_schema = schema.replace("  email TEXT NOT NULL COLLATE NOCASE,\n  waitlist_position INTEGER,", "  email TEXT NOT NULL COLLATE NOCASE,")
+        legacy_schema = schema.replace("  is_present INTEGER NOT NULL DEFAULT 0,\n", "").replace("  email TEXT NOT NULL COLLATE NOCASE,\n  waitlist_position INTEGER,", "  email TEXT NOT NULL COLLATE NOCASE,")
         db = sqlite3.connect(":memory:")
         self.addCleanup(db.close)
         db.row_factory = sqlite3.Row
@@ -646,10 +793,12 @@ class TournamentMigrationTestCase(unittest.TestCase):
         migrate_db(db)
         self.assertEqual(tuple(db.execute("SELECT name, email, declared_rating, registration_answers_json, waitlist_position FROM team_member WHERE entry_id IS NULL").fetchone()), ("Solo", "solo@example.com", 1700, "[]", None))
         self.assertEqual(registration_counts(db, 1), {"confirmed_count": 0.5, "waitlist_count": 1})
-        db.execute("UPDATE team_member SET waitlist_position = 2 WHERE entry_id IS NULL")
+        self.assertEqual(db.execute("SELECT is_present FROM team_member WHERE entry_id IS NULL").fetchone()[0], 0)
+        db.execute("UPDATE team_member SET waitlist_position = 2, is_present = 1 WHERE entry_id IS NULL")
         db.commit()
         migrate_db(db)
         self.assertEqual([(row["kind"], row["waitlist_position"]) for row in waitlist_registrations(db, 1)], [("entry", 1), ("member", 2)])
+        self.assertEqual(db.execute("SELECT is_present FROM team_member WHERE entry_id IS NULL").fetchone()[0], 1)
         self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_legacy_entries_pairings_and_availability_survive_migration(self):
@@ -657,7 +806,8 @@ class TournamentMigrationTestCase(unittest.TestCase):
         legacy_schema = schema.replace("player_id INTEGER REFERENCES player", "player_id INTEGER NOT NULL REFERENCES player")
         legacy_schema = legacy_schema.replace("  excludes_rating INTEGER NOT NULL DEFAULT 0,\n", "").replace("  is_team INTEGER NOT NULL DEFAULT 0,\n", "")
         legacy_schema = legacy_schema.replace("  team_size INTEGER NOT NULL DEFAULT 2,\n", "")
-        legacy_schema = legacy_schema.replace("  email TEXT NOT NULL COLLATE NOCASE,\n  declared_rating INTEGER,", "  email TEXT NOT NULL COLLATE NOCASE,")
+        legacy_schema = legacy_schema.replace("  is_present INTEGER NOT NULL DEFAULT 0,\n", "")
+        legacy_schema = legacy_schema.replace("  email TEXT NOT NULL COLLATE NOCASE,\n  waitlist_position INTEGER,\n  declared_rating INTEGER,", "  email TEXT NOT NULL COLLATE NOCASE,")
         db = sqlite3.connect(":memory:")
         self.addCleanup(db.close)
         db.row_factory = sqlite3.Row

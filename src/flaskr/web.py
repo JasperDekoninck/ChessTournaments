@@ -22,7 +22,17 @@ from flask import (
 
 from .auth import login_required, set_admin_password, verify_password
 from .mailer import send_registration_email, send_waitlist_confirmation_email
-from .teams import assign_team_members, parse_elo, parse_member_emails, parse_team_size, register_team_members, team_members, validate_team_name
+from .teams import (
+    assign_team_members,
+    parse_elo,
+    parse_member_emails,
+    parse_team_size,
+    register_team_members,
+    team_created_from_solos,
+    team_members,
+    unpair_team_members,
+    validate_team_name,
+)
 from .core import (
     RESULT_LABELS,
     FORFEIT_RESULTS,
@@ -1214,6 +1224,23 @@ def assign_team(slug: str):
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
 
+@bp.post("/admin/t/<slug>/teams/<int:entry_id>/unpair")
+@login_required
+def unpair_team(slug: str, entry_id: int):
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    tournament = _tournament_or_404(slug)
+    try:
+        name = unpair_team_members(db, tournament, entry_id)
+        db.commit()
+    except (ValueError, sqlite3.IntegrityError) as exc:
+        db.rollback()
+        flash_error(str(exc) if isinstance(exc, ValueError) else "This team could not be unpaired.")
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    flash_success(f"{name} was unpaired. The players are back under Awaiting team.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug, _anchor="awaiting-team"))
+
+
 @bp.post("/admin/t/<slug>/teams/<int:entry_id>/name")
 @login_required
 def rename_team(slug: str, entry_id: int):
@@ -1308,6 +1335,15 @@ def admin_tournament_detail(slug: str):
     pairings = fetch_pairings(db, tournament["id"])
     entries = _order_admin_entries(fetch_entries(db, tournament["id"]), pairings)
     members = team_members(db, tournament["id"]) if tournament["is_team"] else []
+    solo_team_ids = {
+        entry["id"] for entry in entries
+        if team_created_from_solos(entry, [member for member in members if member["entry_id"] == entry["id"]])
+    }
+    paired_team_ids = {
+        entry_id for pairing in pairings
+        for entry_id in (pairing["white_entry_id"], pairing["black_entry_id"])
+        if entry_id is not None
+    }
     waiting_registrations = []
     for row in waitlist_registrations(db, tournament["id"]):
         item = dict(row)
@@ -1336,6 +1372,8 @@ def admin_tournament_detail(slug: str):
         player_information_rows=_player_information_rows(entries, standings_by_entry, registration_fields),
         entries=entries,
         team_members=members,
+        solo_team_ids=solo_team_ids,
+        paired_team_ids=paired_team_ids,
         waiting_registrations=waiting_registrations,
         team_member_answers={member["id"]: _parse_registration_answers(member["registration_answers_json"]) for member in members},
         registration_summary=registration_counts(db, tournament["id"]),
@@ -1551,6 +1589,29 @@ def confirm_waitlist_entry(slug: str, entry_id: int):
         if error:
             flash_info(error)
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/members/<int:member_id>/presence")
+@login_required
+def set_member_presence(slug: str, member_id: int):
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    tournament = _tournament_or_404(slug)
+    if not tournament["is_team"] or tournament["is_historical"] or tournament["status"] == "completed":
+        abort(400)
+    value = request.form.get("is_present", "0")
+    if value not in {"0", "1"}:
+        abort(400)
+    cursor = db.execute(
+        "UPDATE team_member SET is_present = ? WHERE id = ? AND tournament_id = ?",
+        (int(value), member_id, tournament["id"]),
+    )
+    if cursor.rowcount != 1:
+        abort(404)
+    db.commit()
+    if _wants_json():
+        return jsonify({"ok": True, "is_present": value == "1"})
+    return redirect(url_for("web.admin_tournament_detail", slug=slug, _anchor="awaiting-team"))
 
 
 def _set_solo_waitlist(slug: str, member_id: int, *, waiting: bool):
