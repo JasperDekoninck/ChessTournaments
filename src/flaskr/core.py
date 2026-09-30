@@ -316,58 +316,64 @@ def registration_counts(db, tournament_id: int) -> dict[str, int | float]:
         (tournament_id,),
     ).fetchone()
     confirmed_count = int(rows["confirmed_count"] or 0)
+    waitlist_count = int(rows["waitlist_count"] or 0)
     tournament = db.execute("SELECT is_team, team_size FROM tournament WHERE id = ?", (tournament_id,)).fetchone()
     if tournament and tournament["is_team"]:
-        solo_count = db.execute(
-            "SELECT COUNT(*) FROM team_member WHERE tournament_id = ? AND entry_id IS NULL",
+        solos = db.execute(
+            """
+            SELECT COUNT(CASE WHEN waitlist_position IS NULL THEN 1 END) AS confirmed_count,
+                   COUNT(CASE WHEN waitlist_position IS NOT NULL THEN 1 END) AS waitlist_count
+            FROM team_member WHERE tournament_id = ? AND entry_id IS NULL
+            """,
             (tournament_id,),
-        ).fetchone()[0]
-        whole_teams, remaining_members = divmod(solo_count, tournament["team_size"])
+        ).fetchone()
+        waitlist_count += solos["waitlist_count"]
+        whole_teams, remaining_members = divmod(solos["confirmed_count"], tournament["team_size"])
         confirmed_count += whole_teams
         if remaining_members:
             confirmed_count += remaining_members / tournament["team_size"]
     return {
         "confirmed_count": confirmed_count,
-        "waitlist_count": int(rows["waitlist_count"] or 0),
+        "waitlist_count": waitlist_count,
     }
 
 
+def waitlist_registrations(db, tournament_id: int):
+    """Teams/individual entries and unassigned solo players share one queue."""
+    return db.execute(
+        """
+        SELECT 'entry' AS kind, id, imported_name AS name, imported_email AS email,
+               waitlist_position, created_at, registration_answers_json
+        FROM tournament_entry
+        WHERE tournament_id = ? AND waitlist_position IS NOT NULL
+        UNION ALL
+        SELECT 'member' AS kind, id, name, email,
+               waitlist_position, created_at, registration_answers_json
+        FROM team_member
+        WHERE tournament_id = ? AND entry_id IS NULL AND waitlist_position IS NOT NULL
+        ORDER BY waitlist_position, created_at, kind, id
+        """,
+        (tournament_id, tournament_id),
+    ).fetchall()
+
+
 def next_waitlist_position(db, tournament_id: int) -> int:
-    row = db.execute(
-        "SELECT COALESCE(MAX(waitlist_position), 0) + 1 AS next_position FROM tournament_entry WHERE tournament_id = ?",
-        (tournament_id,),
-    ).fetchone()
-    return int(row["next_position"])
+    rows = waitlist_registrations(db, tournament_id)
+    return rows[-1]["waitlist_position"] + 1 if rows else 1
 
 
 def compact_waitlist(db, tournament_id: int):
-    rows = db.execute(
-        """
-        SELECT id
-        FROM tournament_entry
-        WHERE tournament_id = ? AND waitlist_position IS NOT NULL
-        ORDER BY waitlist_position ASC, registration_order ASC, id ASC
-        """,
-        (tournament_id,),
-    ).fetchall()
-    for position, row in enumerate(rows, start=1):
-        db.execute("UPDATE tournament_entry SET waitlist_position = ? WHERE id = ?", (position, row["id"]))
+    for position, row in enumerate(waitlist_registrations(db, tournament_id), start=1):
+        table = "team_member" if row["kind"] == "member" else "tournament_entry"
+        db.execute(f"UPDATE {table} SET waitlist_position = ? WHERE id = ?", (position, row["id"]))
     db.commit()
 
 
 def promote_next_waitlisted_entry(db, tournament_id: int) -> int | None:
-    row = db.execute(
-        """
-        SELECT id
-        FROM tournament_entry
-        WHERE tournament_id = ? AND waitlist_position IS NOT NULL
-        ORDER BY waitlist_position ASC, registration_order ASC, id ASC
-        LIMIT 1
-        """,
-        (tournament_id,),
-    ).fetchone()
-    if row is None:
+    queue = waitlist_registrations(db, tournament_id)
+    if not queue or queue[0]["kind"] != "entry":
         return None
+    row = queue[0]
     db.execute(
         "UPDATE tournament_entry SET is_active = 0, waitlist_position = NULL WHERE id = ?",
         (row["id"],),

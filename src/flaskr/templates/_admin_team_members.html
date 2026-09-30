@@ -3,7 +3,7 @@
     <h2>Team members</h2>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Team</th><th>Members</th><th>Average Elo</th></tr></thead>
+        <thead><tr><th>Team</th><th>Members</th><th>Status</th><th>Average Elo</th></tr></thead>
         <tbody>
           {% for entry in entries %}
             <tr>
@@ -15,6 +15,7 @@
                 </form>
               </td>
               <td>{% for member in team_members if member.entry_id == entry.id %}<div>{{ member.name or '' }}{% if member.name %} &lt;{% endif %}{{ member.email }}{% if member.name %}&gt;{% endif %}</div>{% endfor %}</td>
+              <td>{% if entry.waitlist_position is not none %}<span class="status-pill status-waitlist">Waiting list #{{ entry.waitlist_position }}</span>{% else %}Confirmed{% endif %}</td>
               <td>{{ entry.declared_rating if entry.declared_rating is not none else '-' }}</td>
             </tr>
           {% endfor %}

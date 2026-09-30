@@ -9,7 +9,7 @@
 
 {% for tournament in open_tournaments %}
   {% set counts = registration_counts[tournament.id] %}
-  {% set registration_full = tournament.max_registrations and counts.confirmed_count + 1 > tournament.max_registrations %}
+  {% set registration_full = (tournament.is_team and counts.waitlist_count) or (tournament.max_registrations and counts.confirmed_count >= tournament.max_registrations) %}
   {% set registration_fields = registration_fields_by_tournament[tournament.id] %}
   <section class="section registration-panel" id="register-{{ tournament.slug }}">
     <div class="registration-event">
@@ -28,7 +28,9 @@
     </div>
     <div class="registration-fields">
     {% if registration_full %}
-      <p class="flash flash-warning">{% if tournament.is_team %}There is no room for another full team. New team registrations will be placed on the waiting list. You can still register alone and be paired at the tournament.{% else %}This tournament is currently full. New registrations will be placed on the waiting list.{% endif %}</p>
+      <p class="flash flash-warning">{% if tournament.is_team %}New registrations, both teams and individual players, will be placed on the waiting list. We will email you if your place is confirmed.{% else %}This tournament is currently full. New registrations will be placed on the waiting list.{% endif %}</p>
+    {% elif tournament.is_team and tournament.max_registrations and counts.confirmed_count + 1 > tournament.max_registrations %}
+      <p class="flash flash-warning">Only individual places remain. A full team will join the waiting list.</p>
     {% endif %}
     <form method="post" action="{{ url_for('web.submit_registration', slug=tournament.slug) }}" class="stack-form registration-form" {{ 'data-team-registration' if tournament.is_team else 'data-register-search' }}>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

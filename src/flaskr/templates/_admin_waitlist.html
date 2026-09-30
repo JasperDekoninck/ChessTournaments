@@ -1,0 +1,39 @@
+<section class="section" id="waiting-list">
+  <div class="section-heading">
+    <h2>Waiting list</h2>
+    <span>{{ waiting_registrations|length }} registrations</span>
+  </div>
+  {% if tournament.max_registrations and registration_summary.confirmed_count > tournament.max_registrations %}
+    <p class="flash flash-warning">Confirmed registrations exceed the tournament capacity ({{ registration_summary.confirmed_count|round(2) }}/{{ tournament.max_registrations }} {{ 'teams' if tournament.is_team else 'players' }}).{% if tournament.is_team %} Review the confirmed solo players under Awaiting team; you can move them to the waiting list and email them there.{% endif %}</p>
+  {% endif %}
+  {% if waiting_registrations %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Position</th><th>Type</th><th>Name</th><th>Email addresses</th><th>Registration details</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for registration in waiting_registrations %}
+            <tr>
+              <td>#{{ registration.waitlist_position }}</td>
+              <td>{{ registration.label }}</td>
+              <td>{{ registration.name }}</td>
+              <td>{% for email in registration.emails %}<div>{{ email or '-' }}</div>{% endfor %}</td>
+              <td>{% for answer in registration.answers %}<div>{{ answer.label }}: {{ answer.value }}</div>{% endfor %}</td>
+              <td>
+                {% if not tournament.is_historical and tournament.status != 'completed' %}
+                  <form method="post" action="{{ url_for('web.confirm_waitlist_member', slug=tournament.slug, member_id=registration.id) if registration.kind == 'member' else url_for('web.confirm_waitlist_entry', slug=tournament.slug, entry_id=registration.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="secondary tiny">Confirm + email</button>
+                  </form>
+                {% else %}
+                  <span class="status-pill status-waitlist">Waiting list</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">No registrations on the waiting list.</p>
+  {% endif %}
+</section>

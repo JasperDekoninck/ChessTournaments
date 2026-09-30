@@ -141,6 +141,7 @@ def migrate_db(db):
 
     if _table_columns(db, "team_member"):
         _add_column_if_missing(db, "team_member", "declared_rating", "INTEGER")
+        _add_column_if_missing(db, "team_member", "waitlist_position", "INTEGER")
 
     pairing_columns = _table_columns(db, "pairing")
     if pairing_columns:

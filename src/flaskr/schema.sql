@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS team_member (
   entry_id INTEGER REFERENCES tournament_entry(id) ON DELETE CASCADE,
   name TEXT,
   email TEXT NOT NULL COLLATE NOCASE,
+  waitlist_position INTEGER,
   declared_rating INTEGER,
   registration_answers_json TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

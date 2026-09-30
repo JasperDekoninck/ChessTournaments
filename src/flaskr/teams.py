@@ -57,15 +57,23 @@ def validate_team_name(db, tournament_id: int, name: str, entry_id: int | None =
         raise ValueError("A team with this name is already registered.")
 
 
-def create_team_entry(db, tournament, name: str, emails: list[str], answers: str | None, source: str, declared_rating: int | None, *, already_confirmed: bool = False):
-    validate_team_name(db, tournament["id"], name)
+def registration_waitlist_position(db, tournament, *, solo: bool = False):
     counts = registration_counts(db, tournament["id"])
     capacity = tournament["max_registrations"]
-    waitlist_position = (
-        next_waitlist_position(db, tournament["id"])
-        if not already_confirmed and capacity and counts["confirmed_count"] + 1 > capacity
-        else None
-    )
+    # Convert team equivalents back to whole people to avoid fractional rounding
+    # errors for team sizes such as three. Existing waiters are never bypassed.
+    confirmed_places = round(counts["confirmed_count"] * tournament["team_size"])
+    requested_places = 1 if solo else tournament["team_size"]
+    if counts["waitlist_count"] or (
+        capacity is not None and confirmed_places + requested_places > capacity * tournament["team_size"]
+    ):
+        return next_waitlist_position(db, tournament["id"])
+    return None
+
+
+def create_team_entry(db, tournament, name: str, emails: list[str], answers: str | None, source: str, declared_rating: int | None, *, already_confirmed: bool = False):
+    validate_team_name(db, tournament["id"], name)
+    waitlist_position = None if already_confirmed else registration_waitlist_position(db, tournament)
     order = db.execute(
         "SELECT COALESCE(MAX(registration_order), 0) + 1 FROM tournament_entry WHERE tournament_id = ?",
         (tournament["id"],),
@@ -93,13 +101,13 @@ def register_team_members(db, tournament, *, name: str, emails: list[str], solo:
     existing_emails = {row["email"].lower() for row in team_members(db, tournament["id"])}
     if existing_emails.intersection(emails):
         raise ValueError("A member with one of these email addresses is already registered for this tournament.")
-    entry_id, waitlist_position = (None, None) if solo else create_team_entry(db, tournament, name, emails, answers, source, declared_rating)
+    entry_id, waitlist_position = (None, registration_waitlist_position(db, tournament, solo=True)) if solo else create_team_entry(db, tournament, name, emails, answers, source, declared_rating)
     db.executemany(
         """
-        INSERT INTO team_member (tournament_id, entry_id, name, email, registration_answers_json, declared_rating)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO team_member (tournament_id, entry_id, name, email, registration_answers_json, declared_rating, waitlist_position)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        [(tournament["id"], entry_id, name if solo else None, email, answers, declared_rating if solo else None) for email in emails],
+        [(tournament["id"], entry_id, name if solo else None, email, answers, declared_rating if solo else None, waitlist_position if solo else None) for email in emails],
     )
     return entry_id, waitlist_position
 
@@ -109,6 +117,8 @@ def assign_team_members(db, tournament, member_ids: list[int], name: str, existi
     members = [row for row in all_members if row["id"] in member_ids]
     if not member_ids or len(members) != len(set(member_ids)) or any(row["entry_id"] is not None for row in members):
         raise ValueError("Select unassigned members from this tournament.")
+    if any(row["waitlist_position"] is not None for row in members):
+        raise ValueError("Confirm waiting-list players before assigning them to a team.")
     if existing_entry_id is not None:
         entry = db.execute(
             "SELECT * FROM tournament_entry WHERE id = ? AND tournament_id = ? AND player_id IS NULL",
@@ -116,6 +126,8 @@ def assign_team_members(db, tournament, member_ids: list[int], name: str, existi
         ).fetchone()
         if entry is None:
             raise ValueError("Choose a team from this tournament.")
+        if entry["waitlist_position"] is not None:
+            raise ValueError("Confirm the waiting-list team before assigning members to it.")
         if db.execute(
             "SELECT 1 FROM pairing WHERE white_entry_id = ? OR black_entry_id = ?",
             (entry["id"], entry["id"]),

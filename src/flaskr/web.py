@@ -55,6 +55,7 @@ from .core import (
     parse_int,
     public_rounds,
     registration_counts,
+    waitlist_registrations,
     registration_open_for_tournament,
     registration_local_time,
     replace_round_pairings,
@@ -880,11 +881,11 @@ def _submit_team_registration(tournament, admin: bool = False):
     if not admin:
         for email in emails:
             send_registration_email(tournament, {"name": name, "email": email}, waitlist_position, solo=solo)
-    if solo:
+    if waitlist_position is not None:
+        flash_warning(f"{name} is on the waiting list in position {waitlist_position}.")
+    elif solo:
         teammates = "another player" if tournament["team_size"] == 2 else "other players"
         flash_success(f"Your registration is confirmed. You will be paired with {teammates} at the tournament.")
-    elif waitlist_position is not None:
-        flash_warning(f"{name} is on the waiting list in position {waitlist_position}.")
     else:
         flash_success(f"{name} is registered for {tournament['name']}.")
     return redirect(destination)
@@ -1307,6 +1308,14 @@ def admin_tournament_detail(slug: str):
     pairings = fetch_pairings(db, tournament["id"])
     entries = _order_admin_entries(fetch_entries(db, tournament["id"]), pairings)
     members = team_members(db, tournament["id"]) if tournament["is_team"] else []
+    waiting_registrations = []
+    for row in waitlist_registrations(db, tournament["id"]):
+        item = dict(row)
+        is_team = tournament["is_team"] and row["kind"] == "entry"
+        item["label"] = "Team" if is_team else "Solo player" if tournament["is_team"] else "Player"
+        item["emails"] = [member["email"] for member in members if member["entry_id"] == row["id"]] if is_team else [row["email"]]
+        item["answers"] = _parse_registration_answers(row["registration_answers_json"])
+        waiting_registrations.append(item)
     availability = fetch_availability(db, tournament["id"])
     standings = compute_standings(db, tournament["id"])
     _annotate_display_ratings(db, tournament, standings)
@@ -1327,6 +1336,7 @@ def admin_tournament_detail(slug: str):
         player_information_rows=_player_information_rows(entries, standings_by_entry, registration_fields),
         entries=entries,
         team_members=members,
+        waiting_registrations=waiting_registrations,
         team_member_answers={member["id"]: _parse_registration_answers(member["registration_answers_json"]) for member in members},
         registration_summary=registration_counts(db, tournament["id"]),
         availability=availability,
@@ -1457,7 +1467,6 @@ def toggle_entry(slug: str, entry_id: int):
             "UPDATE tournament_entry SET is_active = 0, waitlist_position = NULL WHERE id = ?",
             (entry_id,),
         )
-        db.commit()
         compact_waitlist(db, tournament["id"])
     else:
         becoming_active = not bool(entry["is_active"])
@@ -1485,6 +1494,7 @@ def toggle_entry(slug: str, entry_id: int):
     if _wants_json():
         payload = {"ok": True, "entry": _entry_row_payload(db, tournament, entry_id)}
         if entry["waitlist_position"] is not None:
+            payload["reload"] = True
             payload["waitlist"] = [
                 _entry_row_payload(db, tournament, row["id"])
                 for row in db.execute(
@@ -1504,7 +1514,10 @@ def toggle_entry(slug: str, entry_id: int):
 @login_required
 def confirm_waitlist_entry(slug: str, entry_id: int):
     db = get_db()
+    db.execute("BEGIN IMMEDIATE")
     tournament = _tournament_or_404(slug)
+    if tournament["is_historical"] or tournament["status"] == "completed":
+        abort(400)
     entry = db.execute(
         """
         SELECT id, imported_name, imported_email, waitlist_position
@@ -1516,14 +1529,13 @@ def confirm_waitlist_entry(slug: str, entry_id: int):
     if entry is None:
         abort(404)
     if entry["waitlist_position"] is None:
-        flash_warning("This player is already confirmed.")
+        flash_warning("This registration is already confirmed.")
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
     db.execute(
         "UPDATE tournament_entry SET is_active = 0, waitlist_position = NULL WHERE id = ?",
         (entry_id,),
     )
-    db.commit()
     compact_waitlist(db, tournament["id"])
     recipients = [member["email"] for member in team_members(db, tournament["id"]) if member["entry_id"] == entry_id] if tournament["is_team"] else [entry["imported_email"]]
     deliveries = [
@@ -1539,6 +1551,55 @@ def confirm_waitlist_entry(slug: str, entry_id: int):
         if error:
             flash_info(error)
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+def _set_solo_waitlist(slug: str, member_id: int, *, waiting: bool):
+    db = get_db()
+    db.execute("BEGIN IMMEDIATE")
+    tournament = _tournament_or_404(slug)
+    if not tournament["is_team"] or tournament["is_historical"] or tournament["status"] == "completed":
+        abort(400)
+    member = db.execute(
+        "SELECT * FROM team_member WHERE id = ? AND tournament_id = ? AND entry_id IS NULL",
+        (member_id, tournament["id"]),
+    ).fetchone()
+    if member is None:
+        abort(404)
+    if (member["waitlist_position"] is not None) == waiting:
+        flash_warning("This player is already on the waiting list." if waiting else "This player is already confirmed.")
+        return redirect(url_for("web.admin_tournament_detail", slug=slug))
+    position = next_waitlist_position(db, tournament["id"]) if waiting else None
+    db.execute("UPDATE team_member SET waitlist_position = ? WHERE id = ?", (position, member_id))
+    if waiting:
+        db.commit()
+    else:
+        compact_waitlist(db, tournament["id"])
+    recipient = {"name": member["name"] or member["email"], "email": member["email"]}
+    if waiting:
+        sent, error = send_registration_email(tournament, recipient, position, solo=True)
+        action = f"moved to the waiting list in position {position}"
+    else:
+        sent, error = send_waitlist_confirmation_email(tournament, recipient)
+        action = "confirmed and is awaiting a team"
+    if sent:
+        flash_success(f"{recipient['name']} was {action}. Email sent.")
+    else:
+        flash_warning(f"{recipient['name']} was {action}, but the email was not sent.")
+        if error:
+            flash_info(error)
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+@bp.post("/admin/t/<slug>/members/<int:member_id>/confirm")
+@login_required
+def confirm_waitlist_member(slug: str, member_id: int):
+    return _set_solo_waitlist(slug, member_id, waiting=False)
+
+
+@bp.post("/admin/t/<slug>/members/<int:member_id>/waitlist")
+@login_required
+def waitlist_solo_member(slug: str, member_id: int):
+    return _set_solo_waitlist(slug, member_id, waiting=True)
 
 
 @bp.post("/admin/t/<slug>/entries/<int:entry_id>/availability")

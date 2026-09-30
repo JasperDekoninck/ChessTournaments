@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from flaskr import create_app
-from flaskr.core import compute_standings, fetch_entries, fetch_pairings, fetch_tournament_by_slug, registration_counts
+from flaskr.core import compute_standings, fetch_entries, fetch_pairings, fetch_tournament_by_slug, registration_counts, waitlist_registrations
 from flaskr.db import get_db, migrate_db
 from flaskr.rating_integration import current_manager, get_player_history, get_player_profile, rebuild_current_manager, tournament_insights
 
@@ -231,8 +231,16 @@ class TournamentFormatsTestCase(unittest.TestCase):
         response = self.register_team(slug)
         self.assertIn(b"waiting list in position 1", response.data)
         self.assertEqual(self.counts(slug), {"confirmed_count": 0.5, "waitlist_count": 1})
-        self.register_solo(slug, "Morgan", "morgan@example.com")
+        response = self.register_solo(slug, "Morgan", "morgan@example.com")
+        self.assertIn(b"waiting list in position 2", response.data)
+        self.assertEqual(self.counts(slug), {"confirmed_count": 0.5, "waitlist_count": 2})
         members = self.rows("SELECT id FROM team_member WHERE entry_id IS NULL")
+        response = self.client.post(f"/admin/t/{slug}/teams/assign", data={
+            "team_name": "Confirmed Pair", "member_id": [str(row["id"]) for row in members],
+        }, follow_redirects=True)
+        self.assertIn(b"Confirm waiting-list players before assigning", response.data)
+        self.assertEqual(len(self.rows("SELECT * FROM tournament_entry")), 1)
+        self.client.post(f"/admin/t/{slug}/members/{members[-1]['id']}/confirm")
         self.client.post(f"/admin/t/{slug}/teams/assign", data={
             "team_name": "Confirmed Pair", "member_id": [str(row["id"]) for row in members],
         })
@@ -255,13 +263,145 @@ class TournamentFormatsTestCase(unittest.TestCase):
         self.assertEqual(self.counts(slug), {"confirmed_count": 0, "waitlist_count": 0})
         self.assertEqual(self.counts(other)["confirmed_count"], 0.5)
 
-    def test_solos_stay_confirmed_when_team_capacity_is_full(self):
+    def test_solos_join_waitlist_when_team_capacity_is_full(self):
         slug = self.create_tournament(capacity="1")
         self.register_team(slug)
         response = self.register_solo(slug)
-        self.assertIn(b"Your registration is confirmed", response.data)
-        self.assertEqual(self.counts(slug), {"confirmed_count": 1.5, "waitlist_count": 0})
-        self.assertEqual(self.app.extensions["mail_outbox"][-1]["subject"], "Registration Confirmed for Team Cup")
+        self.assertIn(b"Taylor is on the waiting list in position 1", response.data)
+        self.assertNotIn(b"Your registration is confirmed", response.data)
+        self.assertNotIn(b"You can still register alone", response.data)
+        self.assertIn(b"both teams and individual players", response.data)
+        self.assertEqual(self.counts(slug), {"confirmed_count": 1, "waitlist_count": 1})
+        solo = self.rows("SELECT * FROM team_member WHERE entry_id IS NULL")[0]
+        self.assertEqual(solo["waitlist_position"], 1)
+        message = self.app.extensions["mail_outbox"][-1]
+        self.assertEqual(message["subject"], "Waiting List for Team Cup")
+        self.assertIn("waiting list in position 1", message["body"])
+        self.assertNotIn("Your registration is confirmed", message["body"])
+        self.assertNotIn("You will be paired", message["body"])
+
+    def test_mixed_waitlist_is_visible_private_and_renumbered_after_confirmations(self):
+        slug = self.create_tournament(capacity="1")
+        self.register_team(slug)
+        self.register_team(slug, "Bishops", "pat@example.com, robin@example.com")
+        self.register_solo(slug)
+        self.register_team(slug, "Knights", "kai@example.com, jo@example.com")
+        self.assertEqual(self.counts(slug), {"confirmed_count": 1, "waitlist_count": 3})
+        response = self.client.get(f"/admin/t/{slug}")
+        waiting_section = response.data.split(b'id="waiting-list"', 1)[1].split(b"</section>", 1)[0]
+        for text in (b"Bishops", b"pat@example.com", b"robin@example.com", b"Taylor", b"taylor@example.com", b"Knights", b"Solo player", b"#1", b"#2", b"#3"):
+            self.assertIn(text, waiting_section)
+        self.assertNotIn(b"alex@example.com", waiting_section)
+        self.assertIn(b"0 solo registrations", response.data)
+        self.assertLess(response.data.index(b"Add registration"), response.data.index(b"<h2>Team members</h2>"))
+        entries = self.rows("SELECT * FROM tournament_entry ORDER BY id")
+        solo = self.rows("SELECT * FROM team_member WHERE entry_id IS NULL")[0]
+        self.app.extensions["mail_outbox"].clear()
+        self.client.post(f"/admin/t/{slug}/entries/{entries[1]['id']}/confirm")
+        self.assertEqual({mail["to"] for mail in self.app.extensions["mail_outbox"]}, {"pat@example.com", "robin@example.com"})
+        self.assertEqual(self.rows("SELECT waitlist_position FROM team_member WHERE id = ?", (solo["id"],))[0]["waitlist_position"], 1)
+        self.assertEqual(self.rows("SELECT waitlist_position FROM tournament_entry WHERE id = ?", (entries[2]["id"],))[0]["waitlist_position"], 2)
+        self.app.extensions["mail_outbox"].clear()
+        response = self.client.post(f"/admin/t/{slug}/members/{solo['id']}/confirm", follow_redirects=True)
+        self.assertIn(b"Taylor was confirmed and is awaiting a team", response.data)
+        self.assertIn(b"1 solo registrations", response.data)
+        self.assertEqual(self.counts(slug), {"confirmed_count": 2.5, "waitlist_count": 1})
+        message = self.app.extensions["mail_outbox"][0]
+        self.assertEqual(message["to"], "taylor@example.com")
+        self.assertEqual(message["subject"], "Confirmed spot for Team Cup")
+        self.client.post(f"/admin/t/{slug}/members/{solo['id']}/confirm")
+        self.assertEqual(len(self.app.extensions["mail_outbox"]), 1)
+        self.register_solo(slug, "Morgan", "morgan@example.com")
+        with self.app.app_context():
+            db = get_db()
+            queue = waitlist_registrations(db, fetch_tournament_by_slug(db, slug)["id"])
+            self.assertEqual([(row["name"], row["waitlist_position"]) for row in queue], [("Knights", 1), ("Morgan", 2)])
+        with self.client.session_transaction() as session:
+            session.clear()
+        for path in ("/register", f"/t/{slug}", f"/t/{slug}/live"):
+            public_html = self.client.get(path).data
+            for email in (b"pat@example.com", b"robin@example.com", b"taylor@example.com", b"morgan@example.com"):
+                self.assertNotIn(email, public_html)
+        for action in ("confirm", "waitlist"):
+            self.assertEqual(self.client.post(f"/admin/t/{slug}/members/{solo['id']}/{action}").status_code, 302)
+
+    def test_admin_solo_registration_also_obeys_capacity(self):
+        slug = self.create_tournament(capacity="1")
+        self.register_team(slug)
+        response = self.client.post(f"/admin/t/{slug}/entries", data={
+            "registration_mode": "solo", "name": "Taylor", "email": "taylor@example.com",
+        }, follow_redirects=True)
+        self.assertIn(b"Taylor is on the waiting list in position 1", response.data)
+        self.assertEqual(self.counts(slug), {"confirmed_count": 1, "waitlist_count": 1})
+
+    def test_solo_capacity_uses_whole_people_for_larger_teams(self):
+        slug = self.create_tournament(capacity="1", team_size="3")
+        for number in range(3):
+            response = self.register_solo(slug, f"Player {number}", f"player{number}@example.com")
+            self.assertIn(b"Your registration is confirmed", response.data)
+        self.assertEqual(self.counts(slug), {"confirmed_count": 1, "waitlist_count": 0})
+        response = self.register_solo(slug)
+        self.assertIn(b"waiting list in position 1", response.data)
+        self.assertEqual(self.counts(slug), {"confirmed_count": 1, "waitlist_count": 1})
+
+    def test_admin_can_correct_existing_confirmed_solo_without_losing_details(self):
+        slug = self.create_tournament(capacity="1")
+        self.register_solo(slug, approximate_elo="1750")
+        solo = self.rows("SELECT * FROM team_member WHERE entry_id IS NULL")[0]
+        self.register_team(slug)
+        self.app.extensions["mail_outbox"].clear()
+        response = self.client.post(f"/admin/t/{slug}/members/{solo['id']}/waitlist", follow_redirects=True)
+        self.assertIn(b"Taylor was moved to the waiting list in position 2", response.data)
+        updated = self.rows("SELECT * FROM team_member WHERE id = ?", (solo["id"],))[0]
+        self.assertEqual(updated, {**solo, "waitlist_position": 2})
+        self.assertEqual(self.counts(slug), {"confirmed_count": 0, "waitlist_count": 2})
+        self.assertEqual(self.app.extensions["mail_outbox"][0]["subject"], "Waiting List for Team Cup")
+        self.client.post(f"/admin/t/{slug}/members/{solo['id']}/waitlist")
+        self.assertEqual(len(self.app.extensions["mail_outbox"]), 1)
+        # Even with room available, a newcomer cannot jump the existing queue.
+        response = self.register_solo(slug, "Morgan", "morgan@example.com")
+        self.assertIn(b"waiting list in position 3", response.data)
+        self.client.post(f"/admin/t/{slug}/reset-registrations")
+        self.assertEqual(self.counts(slug), {"confirmed_count": 0, "waitlist_count": 0})
+
+    def test_solo_waitlist_actions_reject_wrong_tournament_assigned_and_finished_members(self):
+        slug = self.create_tournament(capacity="1")
+        other = self.create_tournament("Other Cup")
+        self.register_team(slug)
+        self.register_solo(slug)
+        solo = self.rows("SELECT * FROM team_member WHERE entry_id IS NULL")[0]
+        assigned = self.rows("SELECT * FROM team_member WHERE entry_id IS NOT NULL")[0]
+        for action in ("confirm", "waitlist"):
+            self.assertEqual(self.client.post(f"/admin/t/{other}/members/{solo['id']}/{action}").status_code, 404)
+            self.assertEqual(self.client.post(f"/admin/t/{slug}/members/{assigned['id']}/{action}").status_code, 404)
+        with self.app.app_context():
+            db = get_db()
+            db.execute("UPDATE tournament SET status = 'completed' WHERE slug = ?", (slug,))
+            db.commit()
+        for action in ("confirm", "waitlist"):
+            self.assertEqual(self.client.post(f"/admin/t/{slug}/members/{solo['id']}/{action}").status_code, 400)
+        self.assertEqual(self.rows("SELECT waitlist_position FROM team_member WHERE id = ?", (solo["id"],))[0]["waitlist_position"], 1)
+
+    def test_waitlist_remains_saved_when_email_delivery_fails(self):
+        slug = self.create_tournament()
+        self.register_solo(slug)
+        solo = self.rows("SELECT * FROM team_member")[0]
+        with patch("flaskr.web.send_registration_email", return_value=(False, "Mail unavailable")):
+            response = self.client.post(f"/admin/t/{slug}/members/{solo['id']}/waitlist", follow_redirects=True)
+        self.assertIn(b"email was not sent", response.data)
+        self.assertIn(b"Mail unavailable", response.data)
+        self.assertEqual(self.counts(slug), {"confirmed_count": 0, "waitlist_count": 1})
+
+    def test_individual_tournament_waiting_players_are_visible_in_admin(self):
+        slug = self.create_tournament(team=False, capacity="1")
+        self.client.post(f"/register/{slug}", data={"name": "Alex", "email": "alex@example.com"})
+        self.client.post(f"/register/{slug}", data={"name": "Pat", "email": "pat@example.com"})
+        response = self.client.get(f"/admin/t/{slug}")
+        waiting_section = response.data.split(b'id="waiting-list"', 1)[1].split(b"</section>", 1)[0]
+        self.assertIn(b"Pat", waiting_section)
+        self.assertIn(b"pat@example.com", waiting_section)
+        self.assertNotIn(b"alex@example.com", waiting_section)
+        self.assertIn(b"Confirm + email", waiting_section)
 
     def test_assignment_rejects_other_tournaments_and_playing_teams(self):
         slug = self.create_tournament()
@@ -491,6 +631,27 @@ class TournamentFormatsTestCase(unittest.TestCase):
 
 
 class TournamentMigrationTestCase(unittest.TestCase):
+    def test_existing_team_waitlist_and_confirmed_solos_survive_upgrade(self):
+        schema = (Path(__file__).parents[1] / "src/flaskr/schema.sql").read_text()
+        legacy_schema = schema.replace("  email TEXT NOT NULL COLLATE NOCASE,\n  waitlist_position INTEGER,", "  email TEXT NOT NULL COLLATE NOCASE,")
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        db.row_factory = sqlite3.Row
+        db.executescript(legacy_schema)
+        db.execute("INSERT INTO tournament (id, name, slug, event_date, rounds_planned, is_team, max_registrations) VALUES (1, 'Team Cup', 'team', '2026-09-30', 1, 1, 1)")
+        db.execute("INSERT INTO tournament_entry (id, tournament_id, imported_name, seed_rating, member_status, waitlist_position) VALUES (1, 1, 'Waiting Team', 1500, 'unknown', 1)")
+        db.execute("INSERT INTO team_member (tournament_id, name, email, declared_rating, registration_answers_json) VALUES (1, 'Solo', 'solo@example.com', 1700, '[]')")
+        db.execute("INSERT INTO team_member (tournament_id, entry_id, email) VALUES (1, 1, 'team@example.com')")
+        db.commit()
+        migrate_db(db)
+        self.assertEqual(tuple(db.execute("SELECT name, email, declared_rating, registration_answers_json, waitlist_position FROM team_member WHERE entry_id IS NULL").fetchone()), ("Solo", "solo@example.com", 1700, "[]", None))
+        self.assertEqual(registration_counts(db, 1), {"confirmed_count": 0.5, "waitlist_count": 1})
+        db.execute("UPDATE team_member SET waitlist_position = 2 WHERE entry_id IS NULL")
+        db.commit()
+        migrate_db(db)
+        self.assertEqual([(row["kind"], row["waitlist_position"]) for row in waitlist_registrations(db, 1)], [("entry", 1), ("member", 2)])
+        self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
     def test_legacy_entries_pairings_and_availability_survive_migration(self):
         schema = (Path(__file__).parents[1] / "src/flaskr/schema.sql").read_text()
         legacy_schema = schema.replace("player_id INTEGER REFERENCES player", "player_id INTEGER NOT NULL REFERENCES player")

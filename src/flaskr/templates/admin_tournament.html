@@ -40,6 +40,8 @@
   </div>
 </section>
 
+{% include "_admin_waitlist.html" %}
+
 {% if tournament.is_team %}
   {% include "_admin_teams.html" %}
 {% endif %}
@@ -300,7 +302,7 @@
             </td>
             {% if not tournament.is_team %}<td>{{ "✅" if entry.member_status == "member" else "❌" }}</td>{% endif %}
             <td>
-              {% if tournament.is_historical %}
+              {% if tournament.is_historical or (tournament.status == 'completed' and entry.waitlist_position) %}
                 <span class="status-pill {{ 'status-waitlist' if entry.waitlist_position else ('status-on' if entry.is_active else 'status-off') }}">
                   {% if entry.waitlist_position %}waitlist #{{ entry.waitlist_position }}{% else %}{{ "active" if entry.is_active else "inactive" }}{% endif %}
                 </span>

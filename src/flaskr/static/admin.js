@@ -808,6 +808,10 @@ const initEntryToggles = () => {
       if (!response.ok || !payload.ok) {
         return;
       }
+      if (payload.reload) {
+        window.location.reload();
+        return;
+      }
       if (payload.entry) {
         applyEntryState(payload.entry);
       }
