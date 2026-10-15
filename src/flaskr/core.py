@@ -357,6 +357,43 @@ def waitlist_registrations(db, tournament_id: int):
     ).fetchall()
 
 
+def tournament_email_recipients(db, tournament, audience: str) -> list[str]:
+    if tournament["is_team"]:
+        rows = db.execute(
+            """
+            SELECT m.email,
+                   CASE WHEN m.entry_id IS NULL THEN m.waitlist_position
+                        ELSE e.waitlist_position END AS waitlist_position
+            FROM team_member m
+            LEFT JOIN tournament_entry e ON e.id = m.entry_id AND e.tournament_id = m.tournament_id
+            WHERE m.tournament_id = ?
+            ORDER BY m.id
+            """,
+            (tournament["id"],),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """
+            SELECT COALESCE(NULLIF(TRIM(e.imported_email), ''), p.email) AS email,
+                   e.waitlist_position
+            FROM tournament_entry e
+            LEFT JOIN player p ON p.id = e.player_id
+            WHERE e.tournament_id = ?
+            ORDER BY e.id
+            """,
+            (tournament["id"],),
+        ).fetchall()
+    recipients = {}
+    for row in rows:
+        group = "waitlist" if row["waitlist_position"] is not None else "participants"
+        if audience not in {group, "both"}:
+            continue
+        email = (row["email"] or "").strip()
+        if email:
+            recipients.setdefault(email.casefold(), email)
+    return list(recipients.values())
+
+
 def next_waitlist_position(db, tournament_id: int) -> int:
     rows = waitlist_registrations(db, tournament_id)
     return rows[-1]["waitlist_position"] + 1 if rows else 1

@@ -463,6 +463,33 @@
   </details>
 </section>
 
+<section class="section admin-email-panel">
+  <details{% if email_form %} open{% endif %}>
+    <summary>Email participants</summary>
+    <form method="post" action="{{ url_for('web.email_tournament', slug=tournament.slug) }}" class="stack-form centered-form" data-tournament-email>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>
+        Recipients
+        <select name="audience" required>
+          <option value="participants" {% if email_form.get('audience', 'participants') == 'participants' %}selected{% endif %}>All participants</option>
+          <option value="waitlist" {% if email_form.get('audience') == 'waitlist' %}selected{% endif %}>Everyone on the waiting list</option>
+          <option value="both" {% if email_form.get('audience') == 'both' %}selected{% endif %}>Participants and waiting list</option>
+        </select>
+      </label>
+      <p class="muted">Participants include all confirmed registrations{% if tournament.is_team %}, including team members and solo players awaiting a team{% endif %}. Each address receives a separate email. Duplicate addresses and registrations without an email address are skipped.</p>
+      <label>
+        Subject
+        <input type="text" name="subject" value="{{ email_form.get('subject', '') }}" maxlength="200" required>
+      </label>
+      <label>
+        Message
+        <textarea name="message" rows="8" required>{{ email_form.get('message', '') }}</textarea>
+      </label>
+      <button type="submit">Send email</button>
+    </form>
+  </details>
+</section>
+
 {% if not tournament.is_historical %}
   <div class="modal-backdrop" hidden data-modal="registration-settings">
     <div class="modal-card modal-wide">

@@ -22,7 +22,7 @@ WAITLIST_NOTE = (
 )
 
 
-def _mail_enabled() -> bool:
+def mail_enabled() -> bool:
     config = current_app.config
     return bool(
         config.get("MAIL_ENABLED")
@@ -50,7 +50,7 @@ def _tournament_lines(tournament) -> list[str]:
 
 
 def _deliver_message(message: EmailMessage) -> tuple[bool, str | None]:
-    if not _mail_enabled():
+    if not mail_enabled():
         current_app.logger.warning("Mail delivery skipped because SMTP is not fully configured.")
         return False, "Mail delivery is not configured."
 
@@ -94,17 +94,21 @@ def send_email(recipient: str, subject: str, body: str) -> tuple[bool, str | Non
     if not recipient:
         current_app.logger.warning("Mail delivery skipped because no recipient email was provided.")
         return False, "Missing recipient email."
-    if not _mail_enabled():
+    if not mail_enabled():
         current_app.logger.warning("Mail delivery skipped because SMTP is not fully configured.")
         return False, "Mail delivery is not configured."
 
     message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = _sender_header()
-    message["To"] = recipient
-    reply_to = current_app.config.get("MAIL_REPLY_TO")
-    if reply_to:
-        message["Reply-To"] = reply_to
+    try:
+        message["Subject"] = subject
+        message["From"] = _sender_header()
+        message["To"] = recipient
+        reply_to = current_app.config.get("MAIL_REPLY_TO")
+        if reply_to:
+            message["Reply-To"] = reply_to
+    except ValueError:
+        current_app.logger.warning("Mail delivery skipped because email headers are invalid.")
+        return False, "Invalid email headers."
     message.set_content(body)
     return _deliver_message(message)
 

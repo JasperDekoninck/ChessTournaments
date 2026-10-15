@@ -1,5 +1,6 @@
 const ready = () => {
   initConfirmForms();
+  initTournamentEmailForm();
   initOpenRoundPreservers();
   initRoundButtons();
   initRoundEditors();
@@ -21,6 +22,16 @@ const initConfirmForms = () => {
       if (!window.confirm(form.dataset.confirm || "Are you sure?")) {
         event.preventDefault();
       }
+    });
+  });
+};
+
+const initTournamentEmailForm = () => {
+  document.querySelectorAll("form[data-tournament-email]").forEach((form) => {
+    form.addEventListener("submit", () => {
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      button.textContent = "Sending…";
     });
   });
 };

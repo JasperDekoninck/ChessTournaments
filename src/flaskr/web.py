@@ -21,7 +21,7 @@ from flask import (
 )
 
 from .auth import login_required, set_admin_password, verify_password
-from .mailer import send_registration_email, send_waitlist_confirmation_email
+from .mailer import mail_enabled, send_email, send_registration_email, send_waitlist_confirmation_email
 from .teams import (
     assign_team_members,
     parse_elo,
@@ -65,6 +65,7 @@ from .core import (
     parse_int,
     public_rounds,
     registration_counts,
+    tournament_email_recipients,
     waitlist_registrations,
     registration_open_for_tournament,
     registration_local_time,
@@ -1330,6 +1331,53 @@ def update_tournament_registration(slug: str):
 @bp.route("/admin/t/<slug>")
 @login_required
 def admin_tournament_detail(slug: str):
+    return _render_admin_tournament(slug)
+
+
+@bp.post("/admin/t/<slug>/email")
+@login_required
+def email_tournament(slug: str):
+    tournament = _tournament_or_404(slug)
+    email_form = {
+        "audience": request.form.get("audience", ""),
+        "subject": (request.form.get("subject") or "").strip(),
+        "message": request.form.get("message") or "",
+    }
+    error = None
+    if email_form["audience"] not in {"participants", "waitlist", "both"}:
+        error = "Choose participants, the waiting list, or both."
+    elif not email_form["subject"] or not email_form["message"].strip():
+        error = "Subject and message are required."
+    elif len(email_form["subject"]) > 200 or any(char in email_form["subject"] for char in "\r\n"):
+        error = "Use a single-line subject of at most 200 characters."
+    elif not mail_enabled():
+        error = "Email delivery is not configured. Configure SMTP before sending tournament emails."
+    if error:
+        flash_error(error)
+        return _render_admin_tournament(slug, email_form=email_form), 400
+
+    recipients = tournament_email_recipients(get_db(), tournament, email_form["audience"])
+    if not recipients:
+        flash_warning("No email addresses are available for the selected recipients.")
+        return _render_admin_tournament(slug, email_form=email_form), 400
+
+    deliveries = [send_email(email, email_form["subject"], email_form["message"]) for email in recipients]
+    sent = sum(delivered for delivered, _ in deliveries)
+    failed = len(recipients) - sent
+    if failed:
+        flash_warning(f"Sent {sent} of {len(recipients)} emails. {failed} could not be sent.")
+        if sent:
+            flash_info("Sending this form again will also email recipients who already received the message.")
+        error = next((error for delivered, error in deliveries if not delivered and error), None)
+        if error:
+            flash_info(error)
+        return _render_admin_tournament(slug, email_form=email_form), 502
+
+    flash_success(f"Email sent to {sent} recipient{'s' if sent != 1 else ''}.")
+    return redirect(url_for("web.admin_tournament_detail", slug=slug))
+
+
+def _render_admin_tournament(slug: str, *, email_form: dict | None = None):
     db = get_db()
     tournament = _tournament_or_404(slug)
     ensure_round_status_rows(db, tournament["id"], tournament["rounds_planned"])
@@ -1369,6 +1417,7 @@ def admin_tournament_detail(slug: str):
     return render_template(
         "admin_tournament.html",
         tournament=tournament,
+        email_form=email_form or {},
         registration_fields=registration_fields,
         player_information_rows=_player_information_rows(entries, standings_by_entry, registration_fields),
         entries=entries,

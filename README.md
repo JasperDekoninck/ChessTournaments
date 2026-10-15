@@ -47,7 +47,9 @@ To change the number of rounds, open a tournament's **Tournament settings**. Cho
 
 ## Email Setup
 
-Registration and waitlist confirmation emails are disabled until you configure SMTP.
+Registration, waitlist confirmation, and admin tournament emails are disabled until you configure SMTP.
+
+At the bottom of an admin tournament view, expand **Email participants** to send a custom subject and message to all confirmed participants, everyone on the waiting list, or both. Confirmed participants include registrations that are not checked in yet; for team events, every team member and confirmed solo player awaiting a team is included. Emails are sent separately to each unique address, and registrations without an address are skipped. If delivery fails, the form keeps your draft and reports how many emails were sent.
 
 Set these environment variables before starting the app:
 

@@ -615,6 +615,11 @@ h2 {
   margin-top: 0.8rem;
 }
 
+.admin-email-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
 button.danger-subtle {
   border-color: var(--line-strong);
   color: var(--danger);
