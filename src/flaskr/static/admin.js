@@ -1,4 +1,5 @@
 const ready = () => {
+  initRatingJob();
   initConfirmForms();
   initTournamentEmailForm();
   initOpenRoundPreservers();
@@ -14,6 +15,36 @@ const ready = () => {
   initMemberPresence();
   initAvailabilityToggles();
   initModals();
+};
+
+const initRatingJob = () => {
+  const panel = document.querySelector("[data-rating-job]");
+  if (!panel) return;
+  const initialStatus = panel.dataset.status;
+  const initialVersion = Number(panel.dataset.version);
+  const poll = async () => {
+    try {
+      const response = await fetch(panel.dataset.statusUrl, { headers: { Accept: "application/json" } });
+      if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return;
+      const { job } = await response.json();
+      if (!job) return;
+      panel.hidden = false;
+      panel.querySelector("[data-rating-job-message]").textContent = job.message;
+      panel.classList.toggle("flash-warning", job.status === "failed");
+      panel.classList.toggle("flash-info", job.status !== "failed");
+      panel.querySelector("[data-rating-retry]").hidden = job.status !== "failed";
+      const active = ["queued", "running"].includes(job.status);
+      document.querySelectorAll("[data-rating-rebuild] button").forEach((button) => { button.disabled = active; });
+      if (job.status === "completed" && (["queued", "running"].includes(initialStatus) || job.requested_version > initialVersion)) {
+        if (!document.querySelector('[data-save-pending="1"]')) window.location.reload();
+      } else if (active) {
+        window.setTimeout(poll, 2000);
+      }
+    } catch {
+      window.setTimeout(poll, 5000);
+    }
+  };
+  if (["queued", "running"].includes(initialStatus)) window.setTimeout(poll, 1000);
 };
 
 const initConfirmForms = () => {

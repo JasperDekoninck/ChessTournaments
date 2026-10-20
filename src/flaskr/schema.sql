@@ -129,6 +129,16 @@ ON pairing(white_entry_id);
 CREATE INDEX IF NOT EXISTS idx_pairing_black_entry
 ON pairing(black_entry_id);
 
+CREATE TABLE IF NOT EXISTS rating_job (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  requested_version INTEGER NOT NULL DEFAULT 0,
+  completed_version INTEGER NOT NULL DEFAULT 0,
+  full_recompute_version INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'queued',
+  message TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS app_config (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

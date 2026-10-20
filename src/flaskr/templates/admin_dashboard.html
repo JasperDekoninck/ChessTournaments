@@ -17,8 +17,37 @@
     <a href="{{ url_for('web.admin', tab='create') }}" class="{% if active_tab == 'create' %}is-active{% endif %}">{{ icon('plus') }} Create tournament</a>
     <a href="{{ url_for('web.admin', tab='tournaments') }}" class="{% if active_tab == 'tournaments' %}is-active{% endif %}">{{ icon('trophy') }} Tournaments</a>
     <a href="{{ url_for('web.admin', tab='members') }}" class="{% if active_tab == 'members' %}is-active{% endif %}">{{ icon('users') }} Member database</a>
+    <a href="{{ url_for('web.admin', tab='rating') }}" class="{% if active_tab == 'rating' %}is-active{% endif %}">{{ icon('trophy') }} Rating</a>
     <a href="{{ url_for('web.admin', tab='password') }}" class="{% if active_tab == 'password' %}is-active{% endif %}">{{ icon('settings-2') }} Change password</a>
   </nav>
+</section>
+
+{% include "_rating_job.html" %}
+
+<section class="section"{% if active_tab != 'rating' %} hidden{% endif %}>
+  <div class="section-heading"><h2>Rating</h2></div>
+  <p>Rebuild ratings from the original saved games and all completed rated tournaments, in chronological order. Each tournament is included once. The website keeps showing the previous ratings while the rebuild runs.</p>
+  <form method="post" action="{{ url_for('web.admin_rebuild_ratings') }}" class="stack-form centered-form" data-rating-rebuild>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" {% if rating_job and rating_job.status in ['queued', 'running'] %}disabled{% endif %}>Rebuild all ratings</button>
+  </form>
+  <div class="table-wrap rating-history">
+    <table>
+      <thead><tr><th>Date</th><th>Tournament</th><th>Rating eligibility</th><th>Played games</th></tr></thead>
+      <tbody>
+        {% for event in rating_tournaments %}
+          <tr>
+            <td>{{ event.event_date }}</td>
+            <td><a href="{{ url_for('web.admin_tournament_detail', slug=event.slug) }}">{{ event.name }}</a></td>
+            <td>{% if event.excludes_rating or event.is_team %}Unrated{% elif event.status != 'completed' %}Awaiting completion{% else %}Included{% endif %}</td>
+            <td>{{ event.rated_games if event.status == 'completed' and not event.excludes_rating and not event.is_team else '—' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4">No tournaments yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <section class="section create-tournament-layout"{% if active_tab != 'create' %} hidden{% endif %}>

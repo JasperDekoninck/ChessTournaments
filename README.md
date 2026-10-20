@@ -45,6 +45,14 @@ Registration opening times use **Europe/Zurich** (CET/CEST), independently of th
 
 To change the number of rounds, open a tournament's **Tournament settings**. Choose 1–15 rounds; rounds with existing pairings cannot be removed, and finished tournaments keep their round count. Existing results and round availability are preserved.
 
+## Rating updates and recovery
+
+Finishing a rated tournament saves its results immediately and starts a separate background process for ratings and performance statistics. The **Rating** tab in the tournament desk shows progress, failures, and which completed tournaments are eligible. Public pages continue to use the previous published ratings while work runs. Duplicate requests share one worker; changes made during an update are processed afterwards. No extra service or queue installation is required on the existing Linux/systemd deployment.
+
+To repair missing or incorrect ratings, open **Admin → Rating → Rebuild all ratings**. This recomputes the rating periods in chronological order from the original imported games and saved completed tournaments. It starts from the saved inputs, rather than adding results onto the current ratings, so repeating it does not count tournaments twice. Unrated and team events are excluded. Performance estimates are calculated by the background worker; visiting a page never runs them. Unchanged historical statistics are reused when their inputs match.
+
+Failures retain the previously published ratings and offer **Retry rating rebuild**. A process interrupted by a service restart is detected when the admin checks its status. Worker errors are recorded in `rating-worker.log` in the configured instance directory. A full rebuild can also be run from the app's server environment with `uv run flask --app flaskr rebuild-ratings --full`.
+
 ## Email Setup
 
 Registration, waitlist confirmation, and admin tournament emails are disabled until you configure SMTP.

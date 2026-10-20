@@ -21,6 +21,7 @@ from flask import (
 )
 
 from .auth import login_required, set_admin_password, verify_password
+from .rating_jobs import rating_job_status, request_rating_update
 from .mailer import mail_enabled, send_email, send_registration_email, send_waitlist_confirmation_email
 from .teams import (
     assign_team_members,
@@ -89,7 +90,6 @@ from .rating_integration import (
     get_member_since_date,
     list_member_directory,
     player_suggestions,
-    rebuild_current_manager,
     set_member_override,
     set_member_since_date,
     sync_member_statuses,
@@ -100,7 +100,7 @@ from .rating_integration import (
 
 bp = Blueprint("web", __name__)
 bp.add_app_template_filter(registration_local_time)
-ADMIN_TABS = {"create", "tournaments", "members", "password"}
+ADMIN_TABS = {"create", "tournaments", "members", "rating", "password"}
 
 
 def flash_success(message: str):
@@ -985,6 +985,14 @@ def admin():
     members_start = (members_page - 1) * 20
     return render_template(
         "admin_dashboard.html",
+        rating_job=rating_job_status(),
+        rating_tournaments=db.execute(
+            """
+            SELECT t.*, (SELECT COUNT(*) FROM pairing p WHERE p.tournament_id = t.id
+                AND p.black_entry_id IS NOT NULL AND p.result_code IN ('1-0', '0-1', '1/2-1/2')) AS rated_games
+            FROM tournament t ORDER BY event_date, id
+            """
+        ).fetchall() if active_tab == "rating" else [],
         tournaments=fetch_tournaments(db),
         active_tournament=fetch_active_tournament(db),
         member_cutoff=get_member_since_date(db),
@@ -994,6 +1002,20 @@ def admin():
         members_total_pages=members_total_pages,
         member_query=member_query,
     )
+
+
+@bp.get("/admin/ratings/status")
+@login_required
+def admin_rating_status():
+    return jsonify(job=rating_job_status())
+
+
+@bp.post("/admin/ratings/rebuild")
+@login_required
+def admin_rebuild_ratings():
+    request_rating_update(full_recompute=True)
+    flash_info("Rating rebuild requested. Saved tournaments will be processed in chronological order in the background.")
+    return redirect(url_for("web.admin", tab="rating"))
 
 
 @bp.post("/admin/members/cutoff")
@@ -1199,7 +1221,7 @@ def update_tournament_settings(slug: str):
         ensure_round_status_rows(db, tournament["id"], rounds_planned)
     db.commit()
     if excludes_rating != bool(tournament["excludes_rating"]) and tournament["status"] == "completed":
-        rebuild_current_manager(db)
+        request_rating_update()
     flash_success("Tournament settings updated.")
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
@@ -1416,6 +1438,7 @@ def _render_admin_tournament(slug: str, *, email_form: dict | None = None):
     }
     return render_template(
         "admin_tournament.html",
+        rating_job=rating_job_status(),
         tournament=tournament,
         email_form=email_form or {},
         registration_fields=registration_fields,
@@ -1509,7 +1532,7 @@ def reset_tournament_registrations(slug: str):
     )
     db.commit()
     if was_completed:
-        rebuild_current_manager(db)
+        request_rating_update()
     else:
         sync_member_statuses(db)
     flash_success("Registrations, pairings, and results were reset.")
@@ -1525,7 +1548,7 @@ def delete_tournament(slug: str):
     db.execute("DELETE FROM tournament WHERE id = ?", (tournament["id"],))
     db.commit()
     if was_completed:
-        rebuild_current_manager(db)
+        request_rating_update()
     else:
         sync_member_statuses(db)
     flash_success(f"Deleted {tournament['name']}.")
@@ -1936,18 +1959,18 @@ def complete_tournament(slug: str):
     if latest_round is not None and not pairings_complete(db, tournament["id"], latest_round):
         flash_warning(f"Enter all results for round {latest_round} before finishing the tournament.")
         return redirect(_admin_tournament_url(slug, latest_round))
-    db.execute("UPDATE tournament SET status = 'completed' WHERE id = ?", (tournament["id"],))
+    updated = db.execute("UPDATE tournament SET status = 'completed' WHERE id = ? AND status != 'completed'", (tournament["id"],))
     db.commit()
+    if not updated.rowcount:
+        flash_info("This tournament is already finished.")
+        return redirect(_admin_tournament_url(slug, open_round))
     persist_final_standings(db, tournament["id"])
     if not counts_for_rating(tournament):
         sync_member_statuses(db)
         flash_success("Tournament finished. Results are excluded from ratings and rating-based prizes.")
         return redirect(_admin_tournament_url(slug, open_round))
-    try:
-        rebuild_current_manager(db)
-        flash_success("Tournament finished and the leaderboard was updated.")
-    except Exception as exc:
-        flash_warning(f"Tournament was finished, but the leaderboard update failed: {exc}")
+    request_rating_update()
+    flash_success("Tournament finished. Ratings and statistics are updating in the background.")
     return redirect(_admin_tournament_url(slug, open_round))
 
 

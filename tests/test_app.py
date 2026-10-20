@@ -82,6 +82,8 @@ class TournamentAppTestCase(unittest.TestCase):
         self.app = create_app(
             {
                 "TESTING": True,
+                "INSTANCE_PATH": str(root),
+                "RATING_JOBS_EAGER": True,
                 "SECRET_KEY": "test-secret",
                 "DATABASE": str(self.database),
                 "RATING_DATA_DIR": str(self.rating_dir),

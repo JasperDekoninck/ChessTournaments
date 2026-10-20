@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import math
+import os
 import re
 import shlex
 import shutil
+import stat
+import tempfile
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -47,7 +52,6 @@ from .db import get_db
 
 MEMBER_SINCE_KEY = "member_since_date"
 _MANAGER_CACHE: dict[str, tuple[int | None, Manager]] = {}
-_TOURNAMENT_INSIGHTS_CACHE: dict[tuple[int | None, str, str], dict | None] = {}
 _MANAGER_PLAYER_INDEX_CACHE: dict[tuple[int | None, int], dict] = {}
 _PLAYER_VIEW_CACHE: dict[tuple[int | None, int], dict] = {}
 
@@ -89,7 +93,6 @@ def _ensure_rating_dir():
 
 def _clear_runtime_caches():
     _MANAGER_CACHE.clear()
-    _TOURNAMENT_INSIGHTS_CACHE.clear()
     _MANAGER_PLAYER_INDEX_CACHE.clear()
     _PLAYER_VIEW_CACHE.clear()
 
@@ -125,14 +128,18 @@ def import_rating_history(source_repo: str):
 def _load_manager(kind: str) -> Manager:
     path = _manager_path(kind)
     stamp = path.stat().st_mtime_ns if path.exists() else None
-    cached = _MANAGER_CACHE.get(kind)
+    cache_key = str(path.resolve())
+    cached = _MANAGER_CACHE.get(cache_key)
     if cached is not None and cached[0] == stamp:
         return cached[1]
     if path.exists():
         manager = Manager.load(str(path))
     else:
         manager = Manager(player_database=PlayerDatabase(strict=False))
-    _MANAGER_CACHE[kind] = (stamp, manager)
+    _MANAGER_CACHE[cache_key] = (stamp, manager)
+    if cached is not None:
+        _MANAGER_PLAYER_INDEX_CACHE.clear()
+        _PLAYER_VIEW_CACHE.clear()
     return manager
 
 
@@ -861,15 +868,61 @@ def sync_historical_tournaments_from_saved_source() -> int:
     return sync_historical_tournaments(source["value"])
 
 
-def rebuild_current_manager(db):
+def rebuild_current_manager(db, *, progress=None, full_recompute=False):
+    from .rating_jobs import rating_update_lock
+
+    with rating_update_lock():
+        return _rebuild_current_manager(db, progress=progress or (lambda message: None), full_recompute=full_recompute)
+
+
+def _save_manager_atomically(manager, path):
+    previous = path.stat() if path.exists() else None
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
+        temp_path = Path(handle.name)
+    try:
+        manager.save(str(temp_path))
+        os.chmod(temp_path, stat.S_IMODE(previous.st_mode) if previous else 0o644)
+        if previous and os.geteuid() == 0:
+            os.chown(temp_path, previous.st_uid, previous.st_gid)
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _tournament_player_ids(manager, tournament):
+    player_ids = {
+        player_id for game in manager.game_database.get_games_per_tournament(tournament.id)
+        for player_id in (game.home, game.out)
+    }
+    player_ids.update(player_id for player_id, _ in tournament.byes)
+    return sorted(player_id for player_id in player_ids if manager.player_database[player_id] is not None)
+
+
+def _insights_fingerprint(manager, tournament):
+    games = list(manager.game_database.get_games_per_tournament(tournament.id))
+    payload = {
+        "version": 1,
+        "games": [game.generate_settings() for game in games],
+        "byes": tournament.byes,
+        "ratings": {
+            player_id: [manager.player_database[player_id].get_rating_at_date(tournament.get_date(), next=next_).generate_settings() for next_ in (False, True)]
+            for player_id in _tournament_player_ids(manager, tournament)
+        },
+        "system": manager.rating_system.generate_settings(),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def _rebuild_current_manager(db, *, progress, full_recompute):
     _clear_runtime_caches()
     _ensure_rating_dir()
+    progress("Loading saved tournament history…")
     manager = baseline_manager().clone()
-    local_tournaments = db.execute(
+    eligible_tournaments = db.execute(
         """
         SELECT id, name, slug, event_date, rounds_planned
         FROM tournament
-        WHERE status = 'completed' AND is_historical = 0 AND excludes_rating = 0 AND is_team = 0
+        WHERE status = 'completed' AND excludes_rating = 0 AND is_team = 0
         ORDER BY event_date ASC, id ASC
         """
     ).fetchall()
@@ -880,12 +933,11 @@ def rebuild_current_manager(db):
     excluded_tournaments = db.execute(
         "SELECT id, slug FROM tournament WHERE excludes_rating = 1 OR is_team = 1"
     ).fetchall()
-    for excluded in excluded_tournaments:
-        db.execute("UPDATE tournament SET public_insights_json = NULL WHERE id = ?", (excluded["id"],))
-        (tournament_export_root / excluded["slug"] / "leaderboard.csv").unlink(missing_ok=True)
-
-    for tournament_row in local_tournaments:
-        persist_final_standings(db, tournament_row["id"])
+    next_player_id = max(
+        [manager.player_database.get_max_id()]
+        + [player_id for event in manager.tournament_database for player_id, _ in event.byes]
+    ) + 1
+    for tournament_row in eligible_tournaments:
         existing_baseline = next(
             (
                 tournament
@@ -897,6 +949,7 @@ def rebuild_current_manager(db):
         )
         if existing_baseline is not None:
             continue
+        persist_final_standings(db, tournament_row["id"])
         standings = compute_standings(db, tournament_row["id"])
         tie_breaks = {
             row["entry_id"]: {"BH": row["bh"], "BH-C1": row["bh_c1"]}
@@ -908,6 +961,7 @@ def rebuild_current_manager(db):
             rounds=tournament_row["rounds_planned"],
             tie_breaks=tie_breaks,
             tie_break_names=["BH", "BH-C1"],
+            id=manager.tournament_database.get_max_id() + 1,
         )
         entries = fetch_entries(db, tournament_row["id"])
         entry_to_player_id = {}
@@ -916,7 +970,8 @@ def rebuild_current_manager(db):
             canonical_name = entry["canonical_rating_name"] or entry["imported_name"]
             existing = manager.player_database.get_player_by_name(canonical_name)
             if existing is None:
-                created = Player(canonical_name)
+                created = Player(canonical_name, id=next_player_id)
+                next_player_id += 1
                 players.append(created)
                 entry_to_player_id[entry["id"]] = created.id
             else:
@@ -940,16 +995,19 @@ def rebuild_current_manager(db):
                     tournament_id=tournament.id,
                     add_home_advantage=manager.add_home_advantage,
                     forfeit_keep_points=manager.forfeit_keep_points,
+                    id=manager.game_database.get_max_id() + 1 + len(games),
                 )
             )
         tournament.byes = bye_rows
         manager.add_tournament(tournament, games=games, players=players)
 
-    manager.update_rating()
-    manager.save(str(_manager_path("current")))
-    _clear_runtime_caches()
-    sync_player_profiles_from_manager(db, manager)
-    sync_member_statuses(db)
+    if full_recompute:
+        manager.recompute = True
+    progress("Rebuilding all rating periods from saved games…" if full_recompute else "Calculating updated ratings…")
+    manager.update_rating(progress=progress)
+    for player in manager.player_database:
+        if not math.isfinite(player.get_rating().rating) or not math.isfinite(player.get_rating().deviation):
+            raise ValueError("The rating calculation produced an invalid value; previous ratings were kept.")
 
     anonymous = AnonymousLeaderboard.compute(
         manager.player_database,
@@ -960,22 +1018,28 @@ def rebuild_current_manager(db):
 
     completed_tournaments = db.execute(
         """
-        SELECT id, name, slug, event_date, is_historical
+        SELECT id, name, slug, event_date, is_historical, public_insights_json
         FROM tournament
         WHERE status = 'completed' AND excludes_rating = 0 AND is_team = 0
         ORDER BY event_date ASC, id ASC
         """
     ).fetchall()
 
-    for tournament_row in completed_tournaments:
+    insight_updates = []
+    for index, tournament_row in enumerate(completed_tournaments, start=1):
+        progress(f"Updating tournament statistics ({index}/{len(completed_tournaments)})…")
         tournament = _resolve_manager_tournament(manager, tournament_row["name"], tournament_row["event_date"])
         if tournament is None:
             continue
-        insights = _compute_tournament_insights_from_manager(manager, tournament)
-        db.execute(
-            "UPDATE tournament SET public_insights_json = ? WHERE id = ?",
-            (json.dumps(insights, ensure_ascii=True) if insights else None, tournament_row["id"]),
-        )
+        fingerprint = _insights_fingerprint(manager, tournament)
+        stored = _parse_stored_insights(tournament_row["public_insights_json"])
+        if tournament_row["is_historical"] and stored and stored.get("_rating_inputs") == fingerprint and _insights_include_rankings(stored):
+            insights = stored
+        else:
+            insights = _compute_tournament_insights_from_manager(manager, tournament)
+            if insights is not None:
+                insights["_rating_inputs"] = fingerprint
+        insight_updates.append((json.dumps(insights, ensure_ascii=True) if insights else None, tournament_row["id"]))
         if tournament_row["is_historical"]:
             continue
         folder = tournament_export_root / tournament_row["slug"]
@@ -987,8 +1051,19 @@ def rebuild_current_manager(db):
             save_folder=str(folder),
             file_name="leaderboard.csv",
         )
+    progress("Saving ratings and tournament statistics…")
+    _save_manager_atomically(manager, _manager_path("current"))
+    _clear_runtime_caches()
+    db.executemany("UPDATE tournament SET public_insights_json = ? WHERE id = ?", insight_updates)
+    for excluded in excluded_tournaments:
+        db.execute("UPDATE tournament SET public_insights_json = NULL WHERE id = ?", (excluded["id"],))
+        (tournament_export_root / excluded["slug"] / "leaderboard.csv").unlink(missing_ok=True)
     db.commit()
+    sync_player_profiles_from_manager(db, manager)
+    sync_member_statuses(db)
     return anonymous
+
+
 def _manager_player_index(manager: Manager, stamp: int | None) -> dict:
     cache_key = (stamp, id(manager))
     cached = _MANAGER_PLAYER_INDEX_CACHE.get(cache_key)
@@ -1120,11 +1195,8 @@ def _compute_tournament_insights_from_manager(manager: Manager, manager_tourname
 
     normal_dist = NormalDist()
     performance_rows = []
-    for player in manager_tournament.get_players(
-        manager.player_database,
-        manager.game_database,
-        manager.rating_system,
-    ):
+    for player_id in _tournament_player_ids(manager, manager_tournament):
+        player = manager.player_database[player_id]
         rating_before = player.get_rating_at_date(manager_tournament.get_date(), next=False)
         tournament_performance = manager_tournament.get_player_performance(
             player.id,
@@ -1213,11 +1285,8 @@ def tournament_post_ratings(tournament) -> dict[str, int]:
 
     ratings = {}
     event_date = manager_tournament.get_date()
-    for player in manager_tournament.get_players(
-        manager.player_database,
-        manager.game_database,
-        manager.rating_system,
-    ):
+    for player_id in _tournament_player_ids(manager, manager_tournament):
+        player = manager.player_database[player_id]
         try:
             rating = player.get_rating_at_date(event_date, next=True)
         except Exception:
@@ -1253,29 +1322,7 @@ def tournament_insights(tournament) -> dict | None:
     stored = _parse_stored_insights(tournament["public_insights_json"] if "public_insights_json" in tournament.keys() else None)
     if stored is not None and _insights_include_rankings(stored):
         return stored
-    manager, stamp = _preferred_manager()
-    if manager is None:
-        return stored
-    cache_key = (stamp, tournament["event_date"], normalize_name(tournament["name"]))
-    if cache_key in _TOURNAMENT_INSIGHTS_CACHE:
-        cached = _TOURNAMENT_INSIGHTS_CACHE[cache_key]
-        return cached if cached is not None else stored
-
-    manager_tournament = _resolve_manager_tournament(manager, tournament["name"], tournament["event_date"])
-    if manager_tournament is None:
-        _TOURNAMENT_INSIGHTS_CACHE[cache_key] = stored
-        return stored
-
-    insight = _compute_tournament_insights_from_manager(manager, manager_tournament)
-    _TOURNAMENT_INSIGHTS_CACHE[cache_key] = insight
-    if insight is not None:
-        db = get_db()
-        db.execute(
-            "UPDATE tournament SET public_insights_json = ? WHERE id = ?",
-            (json.dumps(insight, ensure_ascii=True), tournament["id"]),
-        )
-        db.commit()
-    return insight if insight is not None else stored
+    return stored
 
 
 def _resolve_player_row(db, player_name: str):
@@ -1414,9 +1461,10 @@ def sync_historical_tournaments_command():
 
 
 @click.command("rebuild-ratings")
-def rebuild_ratings_command():
+@click.option("--full", is_flag=True, help="Recompute every rating period from the saved games, including imported history.")
+def rebuild_ratings_command(full):
     db = get_db()
-    rebuild_current_manager(db)
+    rebuild_current_manager(db, full_recompute=full, progress=click.echo)
     click.echo("Rebuilt local rating state.")
 
 

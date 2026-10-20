@@ -111,7 +111,7 @@ class Manager(BaseClass):
         else:
             self.rating_period.trigger_new_period(datetime.now())
 
-    def update_rating(self):
+    def update_rating(self, progress=None):
         logger.info("Updating ratings...")
 
         if len(self.rating_period) == 0:
@@ -121,9 +121,12 @@ class Manager(BaseClass):
             for player in self.player_database:
                 player.clear_rating_history()
                 player.get_rating().reset()
-                self.last_date_update = None
+            self.last_date_update = None
             self.recompute = False
-        for period_dates in self.rating_period.iterate_periods(self.last_date_update):
+        periods = list(self.rating_period.iterate_periods(self.last_date_update))
+        for index, period_dates in enumerate(periods, start=1):
+            if progress:
+                progress(f"Calculating ratings ({index}/{len(periods)}) — {period_dates[-1]:%Y-%m-%d}…")
             logger.info(f"Updating ratings for period {period_dates[-1]}...")
             if len(period_dates) == 1 and self.game_database.get_n_games_between_dates(period_dates[0]) == 0:
                 continue
@@ -159,7 +162,7 @@ class Manager(BaseClass):
         self.player_database.clear_empty(self.game_database)
         self.trigger_new_period(tournament)
         was_false = not self.recompute
-        self.recompute = (
+        self.recompute = self.recompute or (
             self.last_date_update is not None
             and tournament.get_date() <= self.last_date_update
             and self.do_recompute

@@ -160,11 +160,13 @@ class Polyrating(RatingSystem):
         rating_history = player.get_rating_history()
         player.set_rating_history([])
         player.get_rating().reset()
-        ratings, variations, _, _ = self.compute_period_update(player_database, games_in_tournament, 
-                                                [tournament_date], 
-                                                player_id=player.id)
-        player.get_rating().set(rating_info)
-        player.set_rating_history(rating_history)
+        try:
+            ratings, variations, _, _ = self.compute_period_update(player_database, games_in_tournament,
+                                                    [tournament_date],
+                                                    player_id=player.id)
+        finally:
+            player.get_rating().set(rating_info)
+            player.set_rating_history(rating_history)
         return Rating(ratings[player.id, -1, 0], variations[player.id, -1, 0] ** 0.5)
 
     def period_update(self, player_database : PlayerDatabase, game_database : GameDatabase, 

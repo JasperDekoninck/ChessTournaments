@@ -23,6 +23,7 @@ class TournamentFormatsTestCase(unittest.TestCase):
             (rating_dir / name).write_text("")
         self.app = create_app({
             "TESTING": True, "SECRET_KEY": "test-formats", "INSTANCE_PATH": self.root,
+            "RATING_JOBS_EAGER": True,
             "MAIL_ENABLED": True, "MAIL_HOST": "smtp.example.com", "MAIL_FROM_EMAIL": "club@example.com",
             "MAIL_SUPPRESS_SEND": True,
         })
@@ -155,7 +156,7 @@ class TournamentFormatsTestCase(unittest.TestCase):
         self.client.post(f"/admin/t/{slug}/teams/assign", data={"team_name": "Duplicate", "member_id": [str(row["id"]) for row in members]})
         self.assertEqual(len(self.rows("SELECT * FROM tournament_entry")), 1)
         self.register_team(slug, registration_field_0="CS")
-        with patch("flaskr.web.rebuild_current_manager") as rebuild:
+        with patch("flaskr.web.request_rating_update") as rebuild:
             self.finish_round(slug)
             rebuild.assert_not_called()
         with self.app.app_context():
@@ -890,7 +891,7 @@ class TournamentFormatsTestCase(unittest.TestCase):
         slug = self.create_tournament("Unrated Cup", team=False, excluded=True)
         for name in ("Alice Example", "Bob Sample"):
             self.client.post(f"/admin/t/{slug}/entries", data={"name": name, "declared_rating": "1500"})
-        with patch("flaskr.web.rebuild_current_manager") as rebuild:
+        with patch("flaskr.web.request_rating_update") as rebuild:
             self.finish_round(slug)
             rebuild.assert_not_called()
         with self.app.app_context():

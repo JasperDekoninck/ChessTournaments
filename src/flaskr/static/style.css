@@ -620,6 +620,19 @@ h2 {
   font-weight: 600;
 }
 
+.rating-job {
+  margin-top: 1.5rem;
+}
+
+.rating-job p {
+  margin: 0.5rem 0;
+}
+
+.rating-job form,
+.rating-history {
+  margin-top: 1.5rem;
+}
+
 button.danger-subtle {
   border-color: var(--line-strong);
   color: var(--danger);
