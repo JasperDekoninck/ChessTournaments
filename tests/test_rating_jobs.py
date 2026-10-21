@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from flaskr import create_app, rating_integration as ratings, rating_jobs as jobs
+from flaskr.auth import admin_session_version
 from flaskr.db import get_db
 from rating import Game, Manager, Player, PlayerDatabase, Tournament
 from rating.rating.polyrating_base import Polyrating
@@ -36,8 +37,9 @@ class RatingJobsTestCase(unittest.TestCase):
             "MAIL_ENABLED": False,
         })
         self.client = self.app.test_client()
-        with self.client.session_transaction() as session:
+        with self.app.app_context(), self.client.session_transaction() as session:
             session["is_admin"] = True
+            session["admin_password_version"] = admin_session_version()
         self.history_id = self.event("History", "2026-01-01", historical=True)
         self.event_id = self.event("Cup", "2026-02-01", status="running")
 

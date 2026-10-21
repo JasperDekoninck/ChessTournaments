@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from flaskr import create_app
+from flaskr.auth import admin_session_version
 from flaskr.core import compute_standings, fetch_entries, fetch_pairings, fetch_tournament_by_slug, registration_counts, waitlist_registrations
 from flaskr.db import get_db, migrate_db
 from flaskr.rating_integration import current_manager, get_player_history, get_player_profile, rebuild_current_manager, tournament_insights
@@ -28,8 +29,9 @@ class TournamentFormatsTestCase(unittest.TestCase):
             "MAIL_SUPPRESS_SEND": True,
         })
         self.client = self.app.test_client()
-        with self.client.session_transaction() as session:
+        with self.app.app_context(), self.client.session_transaction() as session:
             session["is_admin"] = True
+            session["admin_password_version"] = admin_session_version()
 
     def tearDown(self):
         self.tempdir.cleanup()

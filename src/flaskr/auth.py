@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import secrets
 from datetime import timedelta
 from functools import wraps
 from pathlib import Path
+from time import time
 import click
-from flask import abort, current_app, flash, g, redirect, request, session, url_for
+from flask import Response, abort, current_app, flash, g, redirect, request, session, url_for
+from flask.cli import with_appcontext
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .db import get_db
@@ -69,6 +72,22 @@ def verify_password(password: str) -> bool:
     return bool(stored_hash) and check_password_hash(stored_hash, password)
 
 
+def admin_session_version(password_hash: str | None = None) -> str:
+    stored_hash = _read_admin_hash_db() if password_hash is None else password_hash
+    return hashlib.sha256((stored_hash or "").encode()).hexdigest()
+
+
+def sign_in_admin(password: str) -> bool:
+    stored_hash = _read_admin_hash_db()
+    if not stored_hash or not check_password_hash(stored_hash, password):
+        return False
+    session.clear()
+    session["is_admin"] = True
+    session["admin_password_version"] = admin_session_version(stored_hash)
+    session.permanent = True
+    return True
+
+
 def ensure_admin_password(default_password: str = "admin"):
     if _read_admin_hash_db() is not None:
         _delete_legacy_admin_hash_file()
@@ -97,6 +116,30 @@ def login_required(view):
     return wrapped_view
 
 
+def _throttle(scope: str, limit: int) -> Response | None:
+    now = int(time())
+    key = f"{scope}:{request.remote_addr or 'unknown'}"
+    db = get_db()
+    db.execute("DELETE FROM request_throttle WHERE expires_at <= ?", (now,))
+    cursor = db.execute(
+        """
+        INSERT INTO request_throttle (key, attempts, expires_at) VALUES (?, 1, ?)
+        ON CONFLICT(key) DO UPDATE SET attempts = attempts + 1
+        WHERE attempts < ?
+        """,
+        (key, now + 60, limit),
+    )
+    allowed = cursor.rowcount == 1
+    expires_at = db.execute("SELECT expires_at FROM request_throttle WHERE key = ?", (key,)).fetchone()[0]
+    db.commit()
+    if not allowed:
+        return Response(
+            "Too many attempts. Please try again in a minute.", status=429,
+            headers={"Retry-After": str(max(1, expires_at - now))}, mimetype="text/plain",
+        )
+    return None
+
+
 def init_app(app):
     app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
     app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")
@@ -105,12 +148,19 @@ def init_app(app):
 
     @app.before_request
     def load_session_flags():
+        if session.get("is_admin") and session.get("admin_password_version") != admin_session_version():
+            session.clear()
         g.is_admin = bool(session.get("is_admin"))
         _csrf_token()
         if request.method == "POST" and not current_app.config.get("TESTING"):
             token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
             if token != session.get("_csrf_token"):
                 abort(400, "Invalid CSRF token.")
+        if request.method == "POST" and not g.is_admin:
+            if request.endpoint == "web.admin":
+                return _throttle("login", 5)
+            if request.endpoint == "web.submit_registration":
+                return _throttle("registration", 30)
 
     @app.context_processor
     def inject_auth_state():
@@ -129,6 +179,7 @@ def init_app(app):
 
     @click.command("set-admin-password")
     @click.argument("password")
+    @with_appcontext
     def set_admin_password_command(password: str):
         set_admin_password(password)
         click.echo("Admin password updated.")

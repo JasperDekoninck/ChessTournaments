@@ -12,6 +12,7 @@ from ..databases.player_database import PlayerDatabase
 from ..databases.tournament_database import TournamentDatabase
 from ..objects.tournament import Tournament
 from ..rating.rating_system import RatingSystem
+from ..utils import safe_csv_cell
 
 
 class Statistic:
@@ -46,7 +47,7 @@ def _write_if_requested(frame: pd.DataFrame, save_folder: str | None, file_name:
     if save_folder and file_name:
         path = Path(save_folder)
         path.mkdir(parents=True, exist_ok=True)
-        frame.to_csv(path / file_name, index=False)
+        frame.map(safe_csv_cell).rename(columns=safe_csv_cell).to_csv(path / file_name, index=False)
     return frame
 
 

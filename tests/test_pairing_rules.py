@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from flaskr import create_app
+from flaskr.auth import admin_session_version
 from flaskr.core import compute_standings, fetch_pairings, pairings_complete
 from flaskr.db import get_db
 from flaskr.swiss_pairing import pair_swiss
@@ -123,8 +124,9 @@ class RoundResultsTestCase(unittest.TestCase):
         self.app = create_app({"TESTING": True, "SECRET_KEY": "pairing-tests",
                                "INSTANCE_PATH": Path(self.tempdir.name), "MAIL_ENABLED": False})
         self.client = self.app.test_client()
-        with self.client.session_transaction() as session:
+        with self.app.app_context(), self.client.session_transaction() as session:
             session["is_admin"] = True
+            session["admin_password_version"] = admin_session_version()
         with self.app.app_context():
             db = get_db()
             self.tid = db.execute("""INSERT INTO tournament

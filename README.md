@@ -19,6 +19,8 @@ The initial admin password is `admin`. Change it immediately from the admin dash
 uv run flask --app flaskr set-admin-password "your-new-password"
 ```
 
+Changing the password signs out all admin sessions. Login attempts are limited to 5 per minute per IP address, and public registrations to 30 per minute per IP address. Limits are shared across Gunicorn workers through SQLite; blocked requests return HTTP 429 with a `Retry-After` header.
+
 ## Local Test Copy
 
 The repo also includes a full copied test instance in `local-test-instance/`. It is meant as a safe sandbox so you can test pairings, registrations, and admin changes without touching `instance/chess.db`.

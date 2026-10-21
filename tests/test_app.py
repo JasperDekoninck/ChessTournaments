@@ -11,7 +11,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from flaskr import create_app
-from flaskr.auth import hash_password
+from flaskr.auth import admin_session_version, hash_password
 from flaskr.core import (
     compute_standings,
     ensure_round_status_rows,
@@ -99,8 +99,9 @@ class TournamentAppTestCase(unittest.TestCase):
         self.tempdir.cleanup()
 
     def _login(self):
-        with self.client.session_transaction() as session:
+        with self.app.app_context(), self.client.session_transaction() as session:
             session["is_admin"] = True
+            session["admin_password_version"] = admin_session_version()
 
     def _create_tournament(self, name="Integration Test Tournament") -> str:
         self._login()

@@ -10,6 +10,15 @@ from .databases import GameDatabase, PlayerDatabase
 from .objects import Game, Player, Tournament
 
 
+def safe_csv_cell(value):
+    """Keep spreadsheet applications from interpreting user text as formulas."""
+    if isinstance(value, str) and (
+        value.startswith(("\t", "\r", "\n")) or value.lstrip().startswith(("=", "+", "-", "@"))
+    ):
+        return "'" + value
+    return value
+
+
 def set_logging_level(level: str):
     logger.remove()
     logger.add(sys.stdout, level=level)

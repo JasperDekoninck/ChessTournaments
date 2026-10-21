@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from flaskr import create_app
+from flaskr.auth import admin_session_version
 from flaskr.db import get_db
 from flaskr.rating_integration import _clear_runtime_caches
 from rating import Manager, Player, PlayerDatabase, Rating
@@ -25,8 +26,9 @@ class RegistrationCsvTestCase(unittest.TestCase):
             "MAIL_ENABLED": False,
         })
         self.client = self.app.test_client()
-        with self.client.session_transaction() as session:
+        with self.app.app_context(), self.client.session_transaction() as session:
             session["is_admin"] = True
+            session["admin_password_version"] = admin_session_version()
 
     def tearDown(self):
         _clear_runtime_caches()

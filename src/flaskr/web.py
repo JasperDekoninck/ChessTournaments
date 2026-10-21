@@ -20,7 +20,9 @@ from flask import (
     url_for,
 )
 
-from .auth import login_required, set_admin_password, verify_password
+from rating.utils import safe_csv_cell
+
+from .auth import login_required, set_admin_password, sign_in_admin, verify_password
 from .rating_jobs import rating_job_status, request_rating_update
 from .mailer import mail_enabled, send_email, send_registration_email, send_waitlist_confirmation_email
 from .teams import (
@@ -313,7 +315,7 @@ def _tournament_standings_csv(tournament) -> str:
     if has_performance_ratings:
         header.append("Performance")
     header.extend(["Score", tournament["primary_tiebreak_label"], tournament["secondary_tiebreak_label"]])
-    writer.writerow(header)
+    writer.writerow([safe_csv_cell(cell) for cell in header])
     for row in standings:
         csv_row = [row["rank"], row["name"]]
         if not tournament["is_team"]:
@@ -321,7 +323,7 @@ def _tournament_standings_csv(tournament) -> str:
         if has_performance_ratings:
             csv_row.append(row["performance_rating"] if row["performance_rating"] is not None else "")
         csv_row.extend([f"{float(row['score']):.1f}", f"{float(row['bh']):.1f}", f"{float(row['bh_c1']):.1f}"])
-        writer.writerow(csv_row)
+        writer.writerow([safe_csv_cell(cell) for cell in csv_row])
     return output.getvalue()
 
 
@@ -961,10 +963,7 @@ def player_history(slug: str, entry_id: int):
 def admin():
     if request.method == "POST" and not session.get("is_admin"):
         password = request.form.get("password") or ""
-        if verify_password(password):
-            session.clear()
-            session["is_admin"] = True
-            session.permanent = True
+        if sign_in_admin(password):
             flash_success("Signed in.")
             return redirect(url_for("web.admin"))
         flash_error("Invalid password.")
@@ -1079,7 +1078,8 @@ def admin_password():
         flash_error("The new passwords do not match.")
         return redirect(url_for("web.admin", tab="password"))
     set_admin_password(new_password)
-    flash_success("Admin password updated.")
+    session.clear()
+    flash_success("Admin password updated. Please sign in again.")
     return redirect(url_for("web.admin", tab="password"))
 
 

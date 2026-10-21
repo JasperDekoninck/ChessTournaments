@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from flaskr import create_app
+from flaskr.auth import admin_session_version
 from flaskr.db import get_db
 
 
@@ -38,8 +39,9 @@ class TournamentEmailTestCase(unittest.TestCase):
             "MAIL_SUPPRESS_SEND": True,
         })
         self.client = self.app.test_client()
-        with self.client.session_transaction() as session:
+        with self.app.app_context(), self.client.session_transaction() as session:
             session["is_admin"] = True
+            session["admin_password_version"] = admin_session_version()
         self.tournament_id = self.tournament()
 
     def tearDown(self):
@@ -227,8 +229,9 @@ class TournamentEmailTestCase(unittest.TestCase):
         response = self.send()
         self.assertIn(b"Sign in to access the admin area.", response.data)
         self.assertEqual(self.outbox(), [])
-        with self.client.session_transaction() as session:
+        with self.app.app_context(), self.client.session_transaction() as session:
             session["is_admin"] = True
+            session["admin_password_version"] = admin_session_version()
         self.app.config["TESTING"] = False
         self.assertEqual(self.send().status_code, 400)
         self.assertEqual(self.outbox(), [])
