@@ -245,7 +245,7 @@ def fetch_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
         FROM tournament
         ORDER BY is_active_public DESC, event_date DESC, id DESC
         """
@@ -259,7 +259,7 @@ def fetch_public_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
         FROM tournament
         WHERE is_public = 1
         ORDER BY is_active_public DESC, event_date DESC, id DESC
@@ -274,7 +274,7 @@ def fetch_active_tournament(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
         FROM tournament
         WHERE is_active_public = 1
         ORDER BY event_date DESC, id DESC
@@ -290,7 +290,7 @@ def fetch_tournament_by_slug(db, slug: str):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
         FROM tournament
         WHERE slug = ?
         """,
@@ -332,7 +332,7 @@ def fetch_open_registration_tournaments(db, current_time: datetime | None = None
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
         FROM tournament
         WHERE is_historical = 0 AND status != 'completed' AND registration_enabled = 1 AND registration_opens_at IS NOT NULL
         ORDER BY event_date ASC, id ASC

@@ -115,6 +115,8 @@ Admins select solo registrations under **Awaiting team** and assign them to a ne
 
 ## Pairing and result controls
 
+Standings, round results, and cumulative scores stay private until a tournament is finished. Admins can use **Latest standings** to review them, or **Publish standings and results** to reveal them earlier. The same control can hide them again while the tournament is running. Pairings remain public.
+
 Individual tournaments use the FIDE Dutch rules effective February 2026. Team tournaments use the separate FIDE Swiss Team system with Type A colour preferences. The pairing adapter uses pinned `gacrux==1.10.62`; run `uv sync` when updating this checkout. Pairings consider the complete prior history, ordered bracket criteria, floats, played colours and bye eligibility. Board order follows General Handling article 3.6.
 
 The existing club conventions remain: rating/name seeding, White as the initial colour, and one result per team encounter scored 1 / 0.5 / 0 with a full-point bye. Individual board scores and secondary team scores are not collected. This is not a claim of FIDE software certification.

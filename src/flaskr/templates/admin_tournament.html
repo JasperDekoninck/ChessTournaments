@@ -13,6 +13,7 @@
     <div class="inline-actions">
       <a class="button-link secondary" href="{{ url_for('web.public_tournament', slug=tournament.slug) }}">{{ icon('external-link') }} {{ "Preview public page" if not tournament.is_public else "Public view" }}</a>
       <a class="button-link secondary" href="{{ url_for('web.export_tournament', slug=tournament.slug) }}">{{ icon('download') }} CSV export</a>
+      <a class="button-link secondary" href="{{ url_for('web.public_tournament', slug=tournament.slug, view='standings') }}">Latest standings</a>
     </div>
   </div>
   <div class="event-details event-details-inline">
@@ -30,6 +31,14 @@
       <button type="submit">{{ "Remove from public homepage" if tournament.is_active_public else "Show on public homepage" }}</button>
     </form>
     {% if not tournament.is_historical %}
+      {% if tournament.status != 'completed' %}
+        <form method="post" action="{{ url_for('web.update_results_visibility', slug=tournament.slug) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="results_public" value="{{ 0 if tournament.results_public else 1 }}">
+          <input type="hidden" name="return_to" value="admin">
+          <button type="submit" class="secondary">{{ 'Hide standings and results' if tournament.results_public else 'Publish standings and results' }}</button>
+        </form>
+      {% endif %}
       <button type="button" class="secondary" data-open-modal="registration-settings">{{ icon('settings-2') }} Tournament settings</button>
       <form method="post" action="{{ url_for('web.complete_tournament', slug=tournament.slug) }}" data-confirm="{{ 'Finish this unrated tournament?' if tournament.excludes_rating else 'Finish this tournament and update the leaderboard?' }}" data-preserve-open-round>
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

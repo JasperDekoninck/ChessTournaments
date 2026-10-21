@@ -2,12 +2,24 @@
   <nav class="tab-row view-tabs" aria-label="Tournament view">
     {% if selected_round %}
       <a class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='boards') }}">Rounds</a>
-      <a class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='standings') }}">Standings</a>
     {% else %}
       <a class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament', slug=tournament.slug, view='boards') }}">Rounds</a>
-      <a class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament', slug=tournament.slug, view='standings') }}">Standings</a>
+    {% endif %}
+    {% if can_view_results %}
+      <a class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='standings') if selected_round and not is_admin else url_for('web.public_tournament', slug=tournament.slug, view='standings') }}">{{ 'Latest standings' if is_admin else 'Standings' }}</a>
     {% endif %}
   </nav>
+
+  {% if is_admin and tournament.status != 'completed' and view_mode == 'standings' %}
+    <div class="section-heading">
+      <small>Standings and results are {{ 'public' if results_public else 'visible only to admins' }}.</small>
+      <form method="post" action="{{ url_for('web.update_results_visibility', slug=tournament.slug) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="results_public" value="{{ 0 if results_public else 1 }}">
+        <button type="submit" class="secondary tiny">{{ 'Hide standings and results' if results_public else 'Publish standings and results' }}</button>
+      </form>
+    </div>
+  {% endif %}
 
   {% if view_mode == "boards" %}
     <div class="section-heading">
@@ -30,9 +42,9 @@
             <tr>
               <th>Board</th>
               <th class="public-player-col public-player-col-white">White</th>
-              <th class="align-center public-score-col">Score</th>
+              {% if can_view_results %}<th class="align-center public-score-col">Score</th>{% endif %}
               <th class="align-center public-result-col">Result</th>
-              <th class="align-center public-score-col">Score</th>
+              {% if can_view_results %}<th class="align-center public-score-col">Score</th>{% endif %}
               <th class="public-player-col public-player-col-black">Black</th>
             </tr>
           </thead>
@@ -47,21 +59,21 @@
                     -
                   {% endif %}
                 </td>
-                <td class="align-center public-score-col public-score-white" data-label="Score">
+                {% if can_view_results %}<td class="align-center public-score-col public-score-white" data-label="Score">
                   {% if pairing.white_score is not none %}
                     {{ "%.1f"|format(pairing.white_score) }}
                   {% else %}
                     -
                   {% endif %}
-                </td>
-                <td class="align-center public-result-col"><span class="result-label {{ 'result-pending' if not pairing.result_code else '' }}">{{ pairing.result_code or "Pending" }}</span></td>
-                <td class="align-center public-score-col public-score-black" data-label="{{ 'Score' if pairing.black_entry_id else '' }}">
+                </td>{% endif %}
+                <td class="align-center public-result-col"><span class="result-label {{ 'result-pending' if not can_view_results or not pairing.result_code else '' }}">{{ (pairing.result_code or "Pending") if can_view_results else 'Hidden' }}</span></td>
+                {% if can_view_results %}<td class="align-center public-score-col public-score-black" data-label="{{ 'Score' if pairing.black_entry_id else '' }}">
                   {% if pairing.black_entry_id and pairing.black_score is not none %}
                     {{ "%.1f"|format(pairing.black_score) }}
                   {% elif pairing.black_entry_id %}
                     -
                   {% endif %}
-                </td>
+                </td>{% endif %}
                 <td class="public-player-col public-player-col-black" data-label="Black">
                   {% if pairing.black_entry_id %}
                     <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.black_entry_id) }}">{{ pairing.black_name }}</a>

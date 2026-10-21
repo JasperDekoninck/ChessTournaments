@@ -24,6 +24,9 @@
 </section>
 
 <section class="section">
+  {% if results_hidden %}
+    <p class="muted">Results are not public yet.</p>
+  {% else %}
   <div class="table-wrap public-table">
     <table class="public-history-table">
       <thead>
@@ -52,5 +55,6 @@
       </tbody>
     </table>
   </div>
+  {% endif %}
 </section>
 {% endblock %}

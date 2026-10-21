@@ -95,6 +95,7 @@ def migrate_db(db):
 
     tournament_columns = _table_columns(db, "tournament")
     if tournament_columns:
+        _add_column_if_missing(db, "tournament", "results_public", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "tournament", "excludes_rating", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "tournament", "is_team", "INTEGER NOT NULL DEFAULT 0")
         _add_column_if_missing(db, "tournament", "team_size", "INTEGER NOT NULL DEFAULT 2")

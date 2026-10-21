@@ -153,6 +153,10 @@ def _public_tournament_or_404(slug: str):
     abort(404)
 
 
+def _results_are_public(tournament) -> bool:
+    return tournament["status"] == "completed" or bool(tournament["results_public"])
+
+
 def _ensure_editable(tournament) -> bool:
     if tournament["is_historical"]:
         flash_warning("Imported historical tournaments are read-only.")
@@ -239,6 +243,8 @@ def _has_performance_ratings(standings: list[dict]) -> bool:
 
 def _round_view_context(tournament, selected_round: int | None = None, final_standings: bool = False):
     db = get_db()
+    results_public = _results_are_public(tournament)
+    can_view_results = results_public or bool(session.get("is_admin"))
     round_numbers = public_rounds(db, tournament["id"])
     latest_round = latest_paired_round(db, tournament["id"])
     if selected_round is None:
@@ -249,7 +255,7 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
     standings_round = None
     if not final_standings and not (tournament["status"] == "completed" and selected_round == latest_round):
         standings_round = selected_round
-    standings = compute_standings(db, tournament["id"], through_round=standings_round)
+    standings = compute_standings(db, tournament["id"], through_round=standings_round) if can_view_results else []
     _annotate_display_ratings(db, tournament, standings)
     insights = _annotate_performance_ratings(db, tournament, standings)
     standings_by_entry = {row["entry_id"]: row for row in standings}
@@ -271,7 +277,9 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
         "has_performance_ratings": _has_performance_ratings(standings),
         "podium": podium,
         "tournament_insights": insights,
-        "view_mode": _selected_public_view(selected_round),
+        "view_mode": _selected_public_view(selected_round) if can_view_results else "boards",
+        "results_public": results_public,
+        "can_view_results": can_view_results,
     }
 
 
@@ -950,7 +958,9 @@ def player_history(slug: str, entry_id: int):
             for pairing in fetch_pairings(db, tournament["id"])
             if entry_id in (pairing["white_entry_id"], pairing["black_entry_id"])
         ]
-        return render_template("player_history.html", tournament=tournament, entry=entry, profile=None, games=games, admin_email=None)
+        results_hidden = not (_results_are_public(tournament) or session.get("is_admin"))
+        return render_template("player_history.html", tournament=tournament, entry=entry, profile=None,
+                               games=[] if results_hidden else games, admin_email=None, results_hidden=results_hidden)
     player_name = entry["canonical_rating_name"] or entry["imported_name"]
     profile = get_player_profile(player_name)
     return render_template(
@@ -1519,6 +1529,19 @@ def admin_activate_tournament(slug: str):
         set_active_tournament(get_db(), tournament["id"])
         flash_success(f"{tournament['name']} is now the public tournament.")
     return redirect(_admin_tournament_url(slug, open_round))
+
+
+@bp.post("/admin/t/<slug>/results-visibility")
+@login_required
+def update_results_visibility(slug: str):
+    tournament = _tournament_or_404(slug)
+    db = get_db()
+    db.execute("UPDATE tournament SET results_public = ? WHERE id = ?",
+               (int(request.form.get("results_public") == "1"), tournament["id"]))
+    db.commit()
+    if request.form.get("return_to") == "admin":
+        return redirect(_admin_tournament_url(slug))
+    return redirect(url_for("web.public_tournament", slug=slug, view="standings"))
 
 
 @bp.post("/admin/t/<slug>/reset-registrations")

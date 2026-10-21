@@ -102,6 +102,7 @@ class TournamentFormatsTestCase(unittest.TestCase):
         response = self.client.get(f"/admin/t/{slug}")
         self.assertIn(b"sam@example.com", response.data)
         self.client.post(f"/admin/t/{slug}/activate")
+        self.client.post(f"/admin/t/{slug}/results-visibility", data={"results_public": "1"})
         with self.client.session_transaction() as session:
             session.clear()
         for path in (f"/t/{slug}", f"/t/{slug}/player/{entries[0]['id']}", f"/t/{slug}/live"):
