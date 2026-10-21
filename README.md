@@ -45,6 +45,12 @@ Registration opening times use **Europe/Zurich** (CET/CEST), independently of th
 
 To change the number of rounds, open a tournament's **Tournament settings**. Choose 1–15 rounds; rounds with existing pairings cannot be removed, and finished tournaments keep their round count. Existing results and round availability are preserved.
 
+## CSV registration import
+
+Upload a registration CSV when creating an individual tournament. Headers are matched without regard to case, spaces, or punctuation: any header containing `name` supplies the name; separate `First name` and `Last name` (or `Given name` and `Surname`) are combined. A `Full name` column is preferred when present. Email headers can contain `email` or `mail`, and rating headers can contain `rating` or `elo`. Email and rating are optional; missing ratings default to 1500 unless an existing player rating is found.
+
+Existing Forminator exports still work. Files must use UTF-8; commas, semicolons, and tabs are accepted as separators. If a `Select`, `Status`, or `Registration status` column is supplied, only `Registered` or blank values are imported. Imported players start unchecked and can be checked in before pairing. An unreadable file or one with no named registered participants shows an error before a tournament is created.
+
 ## Rating updates and recovery
 
 Finishing a rated tournament saves its results immediately and starts a separate background process for ratings and performance statistics. The **Rating** tab in the tournament desk shows progress, failures, and which completed tournaments are eligible. Public pages continue to use the previous published ratings while work runs. Duplicate requests share one worker; changes made during an update are processed afterwards. No extra service or queue installation is required on the existing Linux/systemd deployment.

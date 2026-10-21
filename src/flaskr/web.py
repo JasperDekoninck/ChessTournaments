@@ -1105,6 +1105,13 @@ def create_tournament():
     if is_team and csv_file and csv_file.filename:
         flash_error("Create the team tournament without a player CSV, then add teams or solo registrations.")
         return redirect(url_for("web.admin"))
+    imported_rows = []
+    if csv_file and csv_file.filename:
+        try:
+            imported_rows = parse_registration_csv(csv_file)
+        except ValueError as exc:
+            flash_error(str(exc))
+            return redirect(url_for("web.admin"))
     slug = unique_slug(db, slugify(name))
     cursor = db.execute(
         """
@@ -1117,9 +1124,12 @@ def create_tournament():
         (name, slug, event_date, rounds_planned, csv_file.filename if csv_file else None, int(excludes_rating), int(is_team), team_size),
     )
     db.commit()
-    if csv_file and csv_file.filename:
-        attach_entries_to_tournament(db, cursor.lastrowid, parse_registration_csv(csv_file), build_matcher())
-    flash_success("Tournament created.")
+    if imported_rows:
+        attach_entries_to_tournament(db, cursor.lastrowid, imported_rows, build_matcher())
+        count = db.execute("SELECT COUNT(*) FROM tournament_entry WHERE tournament_id = ?", (cursor.lastrowid,)).fetchone()[0]
+        flash_success(f"Tournament created. Imported {count} registration{'s' if count != 1 else ''}.")
+    else:
+        flash_success("Tournament created.")
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
 

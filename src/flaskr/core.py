@@ -58,7 +58,7 @@ def parse_int(value: str | None, default: int | None = None) -> int | None:
         return default
     try:
         return int(float(cleaned))
-    except ValueError:
+    except (ValueError, OverflowError):
         return default
 
 
@@ -134,26 +134,63 @@ def fuzzy_best_match(name: str, candidates: list[str]) -> tuple[str | None, floa
     return best_name, best_score
 
 
+def _csv_columns(headers, pattern):
+    return [header for header in headers if re.search(pattern, re.sub(r"[\W_]+", "", header.casefold()))]
+
+
+def _csv_value(row, columns):
+    return next(((row.get(column) or "").strip() for column in columns if (row.get(column) or "").strip()), "")
+
+
 def parse_registration_csv(file_storage) -> list[dict]:
     if file_storage is None or not file_storage.filename:
         return []
-    content = file_storage.read()
-    text = content.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
+    try:
+        text = file_storage.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise ValueError("Save the registration CSV as UTF-8 and upload it again.") from None
+    try:
+        dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect, strict=True)
     rows = []
-    for row in reader:
-        select_value = (row.get("Select") or "").strip()
-        if select_value and select_value.lower() != "registered":
-            continue
-        rows.append(
-            {
-                "submitted_at": parse_submitted_time(row.get("Submission Time")),
-                "name": (row.get("Full Name") or "").strip(),
-                "email": (row.get("Email Address") or "").strip() or None,
-                "declared_rating": parse_int(row.get("Rating (Fide, Lichess, chess.com, ...)"), default=None),
-            }
-        )
-    return [row for row in rows if row["name"]]
+    try:
+        headers = reader.fieldnames or []
+        if len(headers) != len(set(headers)):
+            raise ValueError("CSV column headers must be unique.")
+        first = _csv_columns(headers, "first|given|forename")
+        last = _csv_columns(headers, "last|family|surname")
+        full = [header for header in _csv_columns(headers, "name") if header not in first + last or (header in first and header in last)]
+        first = [header for header in first if header not in full]
+        last = [header for header in last if header not in full]
+        full.sort(key=lambda header: "full" not in header.casefold())
+        if not (full or first or last):
+            raise ValueError("The CSV needs a name column (for example, Full Name or separate First Name and Last Name columns).")
+        email_columns = _csv_columns(headers, "mail")
+        rating_columns = _csv_columns(headers, "rating|elo")
+        time_columns = _csv_columns(headers, "submissiontime|submitted|timestamp|registrationtime")
+        status_columns = _csv_columns(headers, "^select|^status$|registrationstatus")
+        for row in reader:
+            if None in row:
+                raise ValueError(f"CSV row {reader.line_num} has too many values. Text containing the separator must be quoted.")
+            status = _csv_value(row, status_columns)
+            if status and status.casefold() != "registered":
+                continue
+            name = _csv_value(row, full) or " ".join(part for part in (_csv_value(row, first), _csv_value(row, last)) if part)
+            if not name:
+                continue
+            rows.append({
+                "submitted_at": parse_submitted_time(_csv_value(row, time_columns)),
+                "name": name,
+                "email": _csv_value(row, email_columns) or None,
+                "declared_rating": parse_int(_csv_value(row, rating_columns)),
+            })
+    except csv.Error:
+        raise ValueError("The CSV could not be read. Check its separators and quotation marks, then upload it again.") from None
+    if not rows:
+        raise ValueError("The CSV contains no named, registered participants to import.")
+    return rows
 
 
 def parse_registration_form_fields(value: str | None) -> list[dict]:
