@@ -482,6 +482,15 @@ body.modal-open {
   border-bottom: 1px solid var(--line);
 }
 
+.section.admin-dashboard-heading {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.dashboard-tabs {
+  margin-bottom: 0;
+}
+
 .section.narrow {
   max-width: 34rem;
   margin: 2rem auto;
