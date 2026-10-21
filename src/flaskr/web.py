@@ -984,7 +984,7 @@ def admin():
     members_start = (members_page - 1) * 20
     return render_template(
         "admin_dashboard.html",
-        rating_job=rating_job_status(),
+        rating_job=rating_job_status() if active_tab == "rating" else None,
         rating_tournaments=db.execute(
             """
             SELECT t.*, (SELECT COUNT(*) FROM pairing p WHERE p.tournament_id = t.id
@@ -1448,7 +1448,6 @@ def _render_admin_tournament(slug: str, *, email_form: dict | None = None):
     }
     return render_template(
         "admin_tournament.html",
-        rating_job=rating_job_status(),
         tournament=tournament,
         email_form=email_form or {},
         registration_fields=registration_fields,

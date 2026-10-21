@@ -22,7 +22,9 @@
   </nav>
 </section>
 
-{% include "_rating_job.html" %}
+{% if active_tab == 'rating' %}
+  {% include "_rating_job.html" %}
+{% endif %}
 
 <section class="section"{% if active_tab != 'rating' %} hidden{% endif %}>
   <div class="section-heading"><h2>Rating</h2></div>

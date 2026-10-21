@@ -3,7 +3,6 @@
 {% from "_ui.html" import icon %}
 {% block title %}{{ tournament.name }} · Admin{% endblock %}
 {% block content %}
-{% include "_rating_job.html" %}
 <section class="section admin-event-heading">
   <a class="back-link" href="{{ url_for('web.admin', tab='tournaments') }}">{{ icon('archive') }} All tournaments</a>
   <div class="section-heading">
