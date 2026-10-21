@@ -78,6 +78,7 @@
   data-live-url="{{ url_for('web.public_tournament_live', slug=tournament.slug) }}"
   data-live-view="{{ view_mode }}"
   data-live-round-no="{% if request.endpoint == 'web.public_tournament_round' %}{{ selected_round }}{% endif %}"
+  data-live-latest-round="{{ latest_round or '' }}"
 >
   {% include "_public_tournament_rounds.html" %}
 </div>

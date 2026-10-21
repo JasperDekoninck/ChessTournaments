@@ -186,6 +186,10 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self._publish_tournament(slug)
 
+        response = self.client.get(f"/t/{slug}/round/1?view=boards")
+        self.assertIn(b'data-live-round-no="1"', response.data)
+        self.assertIn(b'data-live-latest-round="1"', response.data)
+
         with self.app.app_context():
             db = get_db()
             tournament = db.execute("SELECT id FROM tournament WHERE slug = ?", (slug,)).fetchone()
@@ -215,6 +219,13 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
         self.assertIn("Round 2", payload["html"])
+        self.assertEqual(payload["round_url"], f"/t/{slug}/round/2?view=boards")
+
+        response = self.client.get(f"/t/{slug}/round/1?view=boards")
+        self.assertIn(b'data-live-round-no="1"', response.data)
+        self.assertIn(b'data-live-latest-round="2"', response.data)
+        older = self.client.get(f"/t/{slug}/live?round_no=1&view=boards").get_json()
+        self.assertEqual(older["round_url"], f"/t/{slug}/round/1?view=boards")
 
     def test_admin_round_cards_render_score_buttons_for_results(self):
         self._login()

@@ -6,6 +6,9 @@ const initPublicLiveUpdates = () => {
 
   let currentVersion = root.dataset.liveVersion || "";
   let inFlight = false;
+  const followLatestRound = root.dataset.liveView === "boards" && (
+    !root.dataset.liveRoundNo || root.dataset.liveRoundNo === root.dataset.liveLatestRound
+  );
 
   const liveUrl = () => {
     const url = new URL(root.dataset.liveUrl, window.location.origin);
@@ -14,7 +17,7 @@ const initPublicLiveUpdates = () => {
     if (view) {
       url.searchParams.set("view", view);
     }
-    if (roundNo) {
+    if (roundNo && !followLatestRound) {
       url.searchParams.set("round_no", roundNo);
     }
     return url;
@@ -40,6 +43,9 @@ const initPublicLiveUpdates = () => {
       }
       currentVersion = payload.version;
       root.innerHTML = payload.html;
+      if (followLatestRound && root.dataset.liveRoundNo && payload.round_url) {
+        window.history.replaceState(window.history.state, "", payload.round_url);
+      }
     } catch (error) {
       return;
     } finally {

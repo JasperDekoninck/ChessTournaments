@@ -282,6 +282,10 @@ def _public_rounds_fragment_response(tournament, selected_round: int | None):
         {
             "version": hashlib.sha256(html.encode("utf-8")).hexdigest(),
             "html": html,
+            "round_url": url_for(
+                "web.public_tournament_round", slug=tournament["slug"],
+                round_no=context["selected_round"], view=context["view_mode"],
+            ) if context["selected_round"] is not None else None,
         }
     )
 
