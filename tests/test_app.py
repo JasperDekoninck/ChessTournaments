@@ -1116,8 +1116,8 @@ class TournamentAppTestCase(unittest.TestCase):
         html = response.data.decode("utf-8")
         standings_start = html.index('class="public-standings-table"')
         standings_table = html[standings_start : html.index("</table>", standings_start)]
-        self.assertIn(f"<td>{post_rating}</td>", standings_table)
-        self.assertNotIn(f"<td>{seed_rating}</td>", standings_table)
+        self.assertIn(f'<td data-label="Rating">{post_rating}</td>', standings_table)
+        self.assertNotIn(f'<td data-label="Rating">{seed_rating}</td>', standings_table)
 
         response = self.client.get(f"/admin/t/{slug}")
         self.assertEqual(response.status_code, 200)

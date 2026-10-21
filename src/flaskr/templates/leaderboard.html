@@ -11,7 +11,7 @@
     <h2>{{ icon('trophy') }} Players</h2>
     <span>{{ leaderboard|length }} ranked players</span>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap public-table">
     <table class="compact-table leaderboard-table">
       <thead>
         <tr>
@@ -26,21 +26,21 @@
       <tbody>
         {% for row in leaderboard %}
           <tr>
-            <td><span class="rank-number {{ 'rank-podium' if row.Rank|int <= 3 else '' }}">{{ row.Rank }}</span></td>
-            <td>
+            <td class="card-rank"><span class="rank-number {{ 'rank-podium' if row.Rank|int <= 3 else '' }}">{{ row.Rank }}</span></td>
+            <td class="card-name">
               {% if row.Name != "Anonymous" %}
                 <a href="{{ url_for('web.leaderboard_player', player_name=row.Name) }}">{{ row.Name }}</a>
               {% else %}
                 {{ row.Name }}
               {% endif %}
             </td>
-            <td class="score-value">{{ row.Rating }}</td>
-            <td>{{ row.Wins }}</td>
-            <td>{{ row.Losses }}</td>
-            <td>{{ row.Draws }}</td>
+            <td class="score-value" data-label="Rating">{{ row.Rating }}</td>
+            <td data-label="Wins">{{ row.Wins }}</td>
+            <td data-label="Losses">{{ row.Losses }}</td>
+            <td data-label="Draws">{{ row.Draws }}</td>
           </tr>
         {% else %}
-          <tr>
+          <tr class="table-empty">
             <td colspan="6" class="muted">No leaderboard is available yet.</td>
           </tr>
         {% endfor %}

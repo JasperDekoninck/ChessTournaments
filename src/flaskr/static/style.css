@@ -1599,6 +1599,8 @@ tr.is-waitlist .waitlist-note {
 
 .podium-slot strong {
   font-size: 1.1rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .podium-slot strong a {
@@ -1800,6 +1802,187 @@ tr.is-waitlist .waitlist-note {
   th,
   td {
     padding: 0.7rem 0.75rem;
+  }
+
+  .public-table {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+
+  .highlight-card strong {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .event-heading h1,
+  .public-player-name {
+    overflow-wrap: anywhere;
+  }
+
+  .public-table table,
+  .public-table tbody {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .public-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .public-table tbody {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .public-table tr {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: center;
+    gap: 0.65rem 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: white;
+  }
+
+  .public-table td,
+  .public-table .public-player-col,
+  .public-table .public-score-col,
+  .public-table .public-result-col {
+    display: block;
+    width: auto;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.4;
+  }
+
+  .public-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.1rem;
+    color: var(--muted);
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+
+  .public-table td[data-label=""]::before {
+    display: none;
+  }
+
+  .public-table td[data-label="Performance"]::before {
+    content: "Perf.";
+  }
+
+  .public-table td[colspan] {
+    grid-column: 1 / -1;
+  }
+
+  .public-table .table-empty {
+    display: block;
+  }
+
+  .public-table .card-rank {
+    position: absolute;
+    top: 0.75rem;
+    left: 0.75rem;
+  }
+
+  .public-table .card-name {
+    display: flex;
+    align-items: center;
+    grid-column: 1 / -1;
+    min-height: 2rem;
+    padding-left: 2.5rem;
+    font-size: 1rem;
+  }
+
+  .public-table [data-mobile-columns="3"] tr {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .public-table [data-mobile-columns="5"] tr {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .public-table .public-boards-table tr {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "board result" "white white-score" "black black-score";
+  }
+
+  .public-boards-table .board-number {
+    grid-area: board;
+  }
+
+  .public-boards-table td.board-number::before {
+    display: inline;
+    margin-right: 0.35rem;
+  }
+
+  .public-boards-table .public-player-col-white {
+    grid-area: white;
+  }
+
+  .public-boards-table .public-player-col-black {
+    grid-area: black;
+  }
+
+  .public-boards-table .public-result-col {
+    grid-area: result;
+    justify-self: end;
+  }
+
+  .public-boards-table .public-score-white {
+    grid-area: white-score;
+  }
+
+  .public-boards-table .public-score-black {
+    grid-area: black-score;
+  }
+
+  .public-table .public-score-col {
+    text-align: right;
+  }
+
+  .public-table .public-history-table tr {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas: "event event" "white black" "date result";
+    align-items: start;
+  }
+
+  .public-history-table [data-label="Tournament"] {
+    grid-area: event;
+    font-weight: 650;
+  }
+
+  .public-history-table td[data-label="Tournament"]::before {
+    display: none;
+  }
+
+  .public-history-table [data-label="White"] {
+    grid-area: white;
+  }
+
+  .public-history-table [data-label="Black"] {
+    grid-area: black;
+  }
+
+  .public-history-table [data-label="Date"] {
+    grid-area: date;
+  }
+
+  .public-history-table [data-label="Result"] {
+    grid-area: result;
   }
 }
 

@@ -24,7 +24,7 @@
       </nav>
     {% endif %}
     {% if pairings %}
-      <div class="table-wrap">
+      <div class="table-wrap public-table">
         <table class="public-boards-table">
           <thead>
             <tr>
@@ -39,15 +39,15 @@
           <tbody>
             {% for pairing in pairings %}
               <tr>
-                <td class="board-number">{{ pairing.board_no }}</td>
-                <td class="public-player-col public-player-col-white">
+                <td class="board-number" data-label="Board">{{ pairing.board_no }}</td>
+                <td class="public-player-col public-player-col-white" data-label="White">
                   {% if pairing.white_entry_id %}
                     <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.white_entry_id) }}">{{ pairing.white_name }}</a>
                   {% else %}
                     -
                   {% endif %}
                 </td>
-                <td class="align-center public-score-col">
+                <td class="align-center public-score-col public-score-white" data-label="Score">
                   {% if pairing.white_score is not none %}
                     {{ "%.1f"|format(pairing.white_score) }}
                   {% else %}
@@ -55,14 +55,14 @@
                   {% endif %}
                 </td>
                 <td class="align-center public-result-col"><span class="result-label {{ 'result-pending' if not pairing.result_code else '' }}">{{ pairing.result_code or "Pending" }}</span></td>
-                <td class="align-center public-score-col">
+                <td class="align-center public-score-col public-score-black" data-label="{{ 'Score' if pairing.black_entry_id else '' }}">
                   {% if pairing.black_entry_id and pairing.black_score is not none %}
                     {{ "%.1f"|format(pairing.black_score) }}
                   {% elif pairing.black_entry_id %}
                     -
                   {% endif %}
                 </td>
-                <td class="public-player-col public-player-col-black">
+                <td class="public-player-col public-player-col-black" data-label="Black">
                   {% if pairing.black_entry_id %}
                     <a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=pairing.black_entry_id) }}">{{ pairing.black_name }}</a>
                   {% else %}
@@ -81,8 +81,8 @@
     <div class="section-heading">
       <h2>Standings</h2>
     </div>
-    <div class="table-wrap">
-      <table class="public-standings-table">
+    <div class="table-wrap public-table">
+      <table class="public-standings-table" data-mobile-columns="{{ (3 if tournament.is_team else 4) + (1 if has_performance_ratings else 0) }}">
         <thead>
           <tr>
             <th>Rank</th>
@@ -99,18 +99,18 @@
         <tbody>
           {% for row in standings %}
             <tr>
-              <td><span class="rank-number {{ 'rank-podium' if row.rank <= 3 else '' }}">{{ row.rank }}</span></td>
-              <td><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=row.entry_id) }}">{{ row.name }}</a></td>
-              {% if not tournament.is_team %}<td>{{ row.display_rating }}</td>{% endif %}
+              <td class="card-rank"><span class="rank-number {{ 'rank-podium' if row.rank <= 3 else '' }}">{{ row.rank }}</span></td>
+              <td class="card-name"><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=row.entry_id) }}">{{ row.name }}</a></td>
+              {% if not tournament.is_team %}<td data-label="Rating">{{ row.display_rating }}</td>{% endif %}
               {% if has_performance_ratings %}
-                <td>{{ row.performance_rating if row.performance_rating is not none else "-" }}</td>
+                <td data-label="Performance">{{ row.performance_rating if row.performance_rating is not none else "-" }}</td>
               {% endif %}
-              <td class="score-value">{{ "%.1f"|format(row.score) }}</td>
-              <td>{{ "%.1f"|format(row.bh) }}</td>
-              <td>{{ "%.1f"|format(row.bh_c1) }}</td>
+              <td class="score-value" data-label="Score">{{ "%.1f"|format(row.score) }}</td>
+              <td data-label="{{ tournament.primary_tiebreak_label }}">{{ "%.1f"|format(row.bh) }}</td>
+              <td data-label="{{ tournament.secondary_tiebreak_label }}">{{ "%.1f"|format(row.bh_c1) }}</td>
             </tr>
           {% else %}
-            <tr>
+            <tr class="table-empty">
               <td colspan="{{ (7 if has_performance_ratings else 6) - (1 if tournament.is_team else 0) }}" class="muted">No standings yet.</td>
             </tr>
           {% endfor %}
