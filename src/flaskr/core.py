@@ -9,6 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from itertools import groupby
 from math import ceil
 from zoneinfo import ZoneInfo
 
@@ -245,7 +246,7 @@ def fetch_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public, tiebreak_version
         FROM tournament
         ORDER BY is_active_public DESC, event_date DESC, id DESC
         """
@@ -259,7 +260,7 @@ def fetch_public_tournaments(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public, tiebreak_version
         FROM tournament
         WHERE is_public = 1
         ORDER BY is_active_public DESC, event_date DESC, id DESC
@@ -274,7 +275,7 @@ def fetch_active_tournament(db):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public, tiebreak_version
         FROM tournament
         WHERE is_active_public = 1
         ORDER BY event_date DESC, id DESC
@@ -290,7 +291,7 @@ def fetch_tournament_by_slug(db, slug: str):
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label, public_insights_json,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public, tiebreak_version
         FROM tournament
         WHERE slug = ?
         """,
@@ -332,7 +333,7 @@ def fetch_open_registration_tournaments(db, current_time: datetime | None = None
           id, name, slug, event_date, rounds_planned, status, registration_csv_name,
           registration_enabled, registration_opens_at, registration_form_json, event_time, venue, max_registrations,
           source_type, source_ref, primary_tiebreak_label, secondary_tiebreak_label,
-          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public
+          is_historical, is_public, is_active_public, excludes_rating, is_team, team_size, results_public, tiebreak_version
         FROM tournament
         WHERE is_historical = 0 AND status != 'completed' AND registration_enabled = 1 AND registration_opens_at IS NOT NULL
         ORDER BY event_date ASC, id ASC
@@ -671,6 +672,57 @@ def unset_active_tournament(db, tournament_id: int):
     db.commit()
 
 
+def _rank_with_current_tiebreaks(rows, entries, tournament, pairings, round_limit):
+    performances = {}
+    if counts_for_rating(tournament) and tournament["status"] == "completed" and round_limit >= max(
+        (pairing["round_no"] for pairing in pairings), default=0
+    ):
+        try:
+            insights = json.loads(tournament["public_insights_json"] or "{}")
+        except (ValueError, TypeError):
+            insights = {}
+        if isinstance(insights, dict):
+            performance_rows = list(insights.get("surprising_performance_ranking") or [])
+            if isinstance(insights.get("above_level"), dict):
+                performance_rows.append(insights["above_level"])
+            by_name = {
+                normalize_name(row["name"]): row["performance_rating"]
+                for row in performance_rows
+                if isinstance(row, dict) and row.get("name")
+                and isinstance(row.get("performance_rating"), (int, float))
+            }
+            for entry in entries:
+                for name in (entry["canonical_rating_name"], entry["imported_name"]):
+                    if name and normalize_name(name) in by_name:
+                        performances[entry["id"]] = by_name[normalize_name(name)]
+                        break
+
+    def primary(row):
+        return (-row["score"], -row["bh"], -row["bh_c1"],
+                -performances.get(row["entry_id"], float("-inf")))
+
+    def fallback(row):
+        return (-row["seed_rating"], row["name"].lower())
+
+    ordered = []
+    for _, tied in groupby(sorted(rows.values(), key=primary), key=primary):
+        group = list(tied)
+        ids = {row["entry_id"] for row in group}
+        duels = [pairing for pairing in pairings
+                 if pairing["round_no"] <= round_limit
+                 and pairing["white_entry_id"] in ids and pairing["black_entry_id"] in ids
+                 and normalize_result_code(pairing["result_code"]) in {"1-0", "0-1", "1/2-1/2"}]
+        played = {frozenset((game["white_entry_id"], game["black_entry_id"])) for game in duels}
+        direct_scores = defaultdict(float)
+        if len(group) > 1 and len(played) == len(group) * (len(group) - 1) // 2:
+            for game in duels:
+                white_points, black_points = _result_tuple(game["result_code"])
+                direct_scores[game["white_entry_id"]] += white_points
+                direct_scores[game["black_entry_id"]] += black_points
+        ordered.extend(sorted(group, key=lambda row: (-direct_scores[row["entry_id"]], *fallback(row))))
+    return ordered
+
+
 def compute_standings(
     db,
     tournament_id: int,
@@ -679,7 +731,8 @@ def compute_standings(
 ) -> list[dict]:
     tournament = db.execute(
         """
-        SELECT status, rounds_planned, is_historical, primary_tiebreak_label, secondary_tiebreak_label
+        SELECT status, rounds_planned, is_historical, primary_tiebreak_label, secondary_tiebreak_label,
+               tiebreak_version, excludes_rating, is_team, public_insights_json
         FROM tournament
         WHERE id = ?
         """,
@@ -893,16 +946,19 @@ def compute_standings(
         else:
             row["bh_c1"] = 0.0
 
-    ordered = sorted(
-        rows.values(),
-        key=lambda row: (-row["score"], -row["bh"], -row["bh_c1"], -row["seed_rating"], row["name"].lower()),
-    )
+    if tournament["tiebreak_version"] >= 2:
+        ordered = _rank_with_current_tiebreaks(rows, entries, tournament, pairings, round_limit)
+    else:
+        ordered = sorted(
+            rows.values(),
+            key=lambda row: (-row["score"], -row["bh"], -row["bh_c1"], -row["seed_rating"], row["name"].lower()),
+        )
     for index, row in enumerate(ordered, start=1):
         row["rank"] = index
     return ordered
 
 
-def persist_final_standings(db, tournament_id: int):
+def persist_final_standings(db, tournament_id: int, *, commit: bool = True):
     standings = compute_standings(db, tournament_id, prefer_stored=False)
     standings_by_entry = {row["entry_id"]: row for row in standings}
     entries = fetch_entries(db, tournament_id)
@@ -922,7 +978,8 @@ def persist_final_standings(db, tournament_id: int):
             """,
             updates,
         )
-        db.commit()
+        if commit:
+            db.commit()
 
 
 def generate_swiss_pairings(db, tournament_id: int, round_no: int) -> list[dict]:

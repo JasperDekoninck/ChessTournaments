@@ -28,7 +28,7 @@ from rating import (
     Tournament,
     TournamentRanking,
 )
-from rating.utils import extract_players, extract_tournament
+from rating.utils import extract_players, extract_tournament, safe_csv_cell
 
 from .core import (
     MatchResult,
@@ -920,7 +920,7 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
     manager = baseline_manager().clone()
     eligible_tournaments = db.execute(
         """
-        SELECT id, name, slug, event_date, rounds_planned
+        SELECT id, name, slug, event_date, rounds_planned, tiebreak_version
         FROM tournament
         WHERE status = 'completed' AND excludes_rating = 0 AND is_team = 0
         ORDER BY event_date ASC, id ASC
@@ -931,7 +931,7 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
     tournament_export_root.mkdir(parents=True, exist_ok=True)
 
     excluded_tournaments = db.execute(
-        "SELECT id, slug FROM tournament WHERE excludes_rating = 1 OR is_team = 1"
+        "SELECT id, slug, status, tiebreak_version FROM tournament WHERE excludes_rating = 1 OR is_team = 1"
     ).fetchall()
     next_player_id = max(
         [manager.player_database.get_max_id()]
@@ -949,7 +949,9 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
         )
         if existing_baseline is not None:
             continue
-        persist_final_standings(db, tournament_row["id"])
+        if not db.execute("SELECT 1 FROM tournament_entry WHERE tournament_id = ? AND final_rank IS NOT NULL LIMIT 1",
+                          (tournament_row["id"],)).fetchone():
+            persist_final_standings(db, tournament_row["id"])
         standings = compute_standings(db, tournament_row["id"])
         tie_breaks = {
             row["entry_id"]: {"BH": row["bh"], "BH-C1": row["bh_c1"]}
@@ -964,6 +966,8 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
             id=manager.tournament_database.get_max_id() + 1,
         )
         entries = fetch_entries(db, tournament_row["id"])
+        if tournament_row["tiebreak_version"] >= 2:
+            entries = sorted(entries, key=lambda entry: entry["id"])
         entry_to_player_id = {}
         players = []
         for entry in entries:
@@ -999,6 +1003,8 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
                 )
             )
         tournament.byes = bye_rows
+        if tournament_row["tiebreak_version"] >= 2:
+            tournament.tie_breaks = {entry_to_player_id[entry_id]: values for entry_id, values in tie_breaks.items()}
         manager.add_tournament(tournament, games=games, players=players)
 
     if full_recompute:
@@ -1018,7 +1024,7 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
 
     completed_tournaments = db.execute(
         """
-        SELECT id, name, slug, event_date, is_historical, public_insights_json
+        SELECT id, name, slug, event_date, is_historical, public_insights_json, tiebreak_version
         FROM tournament
         WHERE status = 'completed' AND excludes_rating = 0 AND is_team = 0
         ORDER BY event_date ASC, id ASC
@@ -1026,6 +1032,7 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
     ).fetchall()
 
     insight_updates = []
+    new_rankings = []
     for index, tournament_row in enumerate(completed_tournaments, start=1):
         progress(f"Updating tournament statistics ({index}/{len(completed_tournaments)})…")
         tournament = _resolve_manager_tournament(manager, tournament_row["name"], tournament_row["event_date"])
@@ -1043,22 +1050,35 @@ def _rebuild_current_manager(db, *, progress, full_recompute):
         if tournament_row["is_historical"]:
             continue
         folder = tournament_export_root / tournament_row["slug"]
-        TournamentRanking.compute(
+        frame = TournamentRanking.compute(
             manager.player_database,
             manager.game_database,
             tournament,
             manager.rating_system,
-            save_folder=str(folder),
+            save_folder=str(folder) if tournament_row["tiebreak_version"] < 2 else None,
             file_name="leaderboard.csv",
         )
+        if tournament_row["tiebreak_version"] >= 2:
+            new_rankings.append((tournament_row["id"], folder, frame))
     progress("Saving ratings and tournament statistics…")
     _save_manager_atomically(manager, _manager_path("current"))
     _clear_runtime_caches()
     db.executemany("UPDATE tournament SET public_insights_json = ? WHERE id = ?", insight_updates)
+    for tournament_id, _folder, _frame in new_rankings:
+        persist_final_standings(db, tournament_id, commit=False)
     for excluded in excluded_tournaments:
         db.execute("UPDATE tournament SET public_insights_json = NULL WHERE id = ?", (excluded["id"],))
+        if excluded["tiebreak_version"] >= 2 and excluded["status"] == "completed":
+            persist_final_standings(db, excluded["id"], commit=False)
         (tournament_export_root / excluded["slug"] / "leaderboard.csv").unlink(missing_ok=True)
     db.commit()
+    for tournament_id, folder, frame in new_rankings:
+        ranks = {row["entry_id"]: row["rank"] for row in compute_standings(db, tournament_id)}
+        by_name = {normalize_name(entry["canonical_rating_name"] or entry["imported_name"]): ranks[entry["id"]]
+                   for entry in fetch_entries(db, tournament_id) if entry["id"] in ranks}
+        frame["Rank"] = frame["Name"].map(lambda name: by_name.get(normalize_name(name))).fillna(frame["Rank"]).astype(int)
+        folder.mkdir(parents=True, exist_ok=True)
+        frame.sort_values("Rank").map(safe_csv_cell).to_csv(folder / "leaderboard.csv", index=False)
     sync_player_profiles_from_manager(db, manager)
     sync_member_statuses(db)
     return anonymous

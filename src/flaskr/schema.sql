@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS tournament (
   is_public INTEGER NOT NULL DEFAULT 1,
   is_active_public INTEGER NOT NULL DEFAULT 0,
   results_public INTEGER NOT NULL DEFAULT 0,
+  tiebreak_version INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

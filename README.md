@@ -115,6 +115,8 @@ Admins select solo registrations under **Awaiting team** and assign them to a ne
 
 ## Pairing and result controls
 
+New tournaments rank players by score, BH, BH-C1, performance (rated events only), direct encounter, starting rating, then name. Direct encounter uses the tied players' results against one another only if every pair in the tied group has played a completed game. Existing tournaments keep their original rule set and saved positions, including during rating rebuilds. Performance tiebreaks are finalized by the background rating update after a rated event finishes; final podium highlights wait for that calculation.
+
 Standings, round results, and cumulative scores stay private until a tournament is finished. Admins can use **Latest standings** to review them, or **Publish standings and results** to reveal them earlier. The same control can hide them again while the tournament is running. Pairings remain public.
 
 Individual tournaments use the FIDE Dutch rules effective February 2026. Team tournaments use the separate FIDE Swiss Team system with Type A colour preferences. The pairing adapter uses pinned `gacrux==1.10.62`; run `uv sync` when updating this checkout. Pairings consider the complete prior history, ordered bracket criteria, floats, played colours and bye eligibility. Board order follows General Handling article 3.6.

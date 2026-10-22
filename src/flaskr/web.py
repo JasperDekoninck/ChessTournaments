@@ -267,7 +267,9 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
         row["white_score"] = float(white_standing["score"]) if white_standing else None
         row["black_score"] = float(black_standing["score"]) if black_standing else None
         pairing_rows.append(row)
-    podium = standings[:3] if tournament["status"] == "completed" else []
+    final_rankings_pending = (tournament["tiebreak_version"] >= 2 and counts_for_rating(tournament)
+                              and tournament["status"] == "completed" and insights is None)
+    podium = standings[:3] if tournament["status"] == "completed" and not final_rankings_pending else []
     return {
         "round_numbers": round_numbers,
         "selected_round": selected_round,
@@ -280,6 +282,7 @@ def _round_view_context(tournament, selected_round: int | None = None, final_sta
         "view_mode": _selected_public_view(selected_round) if can_view_results else "boards",
         "results_public": results_public,
         "can_view_results": can_view_results,
+        "final_rankings_pending": final_rankings_pending,
     }
 
 
@@ -1132,8 +1135,8 @@ def create_tournament():
         INSERT INTO tournament (
           name, slug, event_date, rounds_planned, registration_csv_name, status,
           source_type, primary_tiebreak_label, secondary_tiebreak_label, is_public, is_active_public,
-          excludes_rating, is_team, team_size
-        ) VALUES (?, ?, ?, ?, ?, 'draft', 'local', 'BH', 'BH-C1', 0, 0, ?, ?, ?)
+          excludes_rating, is_team, team_size, tiebreak_version
+        ) VALUES (?, ?, ?, ?, ?, 'draft', 'local', 'BH', 'BH-C1', 0, 0, ?, ?, ?, 2)
         """,
         (name, slug, event_date, rounds_planned, csv_file.filename if csv_file else None, int(excludes_rating), int(is_team), team_size),
     )

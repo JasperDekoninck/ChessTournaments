@@ -93,6 +93,9 @@
     <div class="section-heading">
       <h2>Standings</h2>
     </div>
+    {% if final_rankings_pending %}
+      <p class="muted">Final positions are updating. Performance ratings will be included when ready.</p>
+    {% endif %}
     <div class="table-wrap public-table">
       <table class="public-standings-table" data-mobile-columns="{{ (3 if tournament.is_team else 4) + (1 if has_performance_ratings else 0) }}">
         <thead>
