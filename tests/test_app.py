@@ -572,7 +572,7 @@ class TournamentAppTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"We store your data only for the purpose of registering for this tournament", response.data)
 
-    def test_registration_notices_say_membership_is_free(self):
+    def test_registration_notices_omit_obsolete_membership_copy(self):
         tournament = {"name": "Free Tournament", "event_date": "2026-10-01", "event_time": None, "venue": None}
         response = self.client.get("/register")
         self.assertEqual(response.status_code, 200)
@@ -584,7 +584,7 @@ class TournamentAppTestCase(unittest.TestCase):
         }
         for name, notice in notices.items():
             with self.subTest(notice=name):
-                self.assertIn("Membership is free this year, you will not have to pay to participate in the tournament.", notice)
+                self.assertNotIn("Membership is free this year", notice)
                 for old_wording in ("CHF 5", "5 CHF", "TWINT", "bank transfers", "payable at the start"):
                     self.assertNotIn(old_wording, notice)
 

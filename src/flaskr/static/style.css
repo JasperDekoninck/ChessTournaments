@@ -9,8 +9,8 @@
 :root {
   --bg: #f6f7f8;
   --surface: #ffffff;
-  --text: #202328;
-  --muted: #626770;
+  --text: #000000;
+  --muted: #000000;
   --line: #e0e3e7;
   --line-strong: #c6cbd2;
   --accent: #225fce;
@@ -78,7 +78,7 @@ h3 {
 }
 
 a {
-  color: var(--accent);
+  color: var(--text);
   text-decoration: none;
 }
 
@@ -171,6 +171,11 @@ textarea:focus {
   box-shadow: 0 0 0 3px #225fce20;
 }
 
+::placeholder {
+  color: #626770;
+  opacity: 1;
+}
+
 input:disabled,
 select:disabled {
   color: var(--muted);
@@ -225,7 +230,6 @@ textarea {
 .site-header {
   background: var(--ink);
   color: white;
-  border-bottom: 3px solid var(--accent);
 }
 
 .site-header-inner {
@@ -275,11 +279,6 @@ small {
   color: var(--muted);
 }
 
-.brand-copy small {
-  color: #b4bac4;
-  font-size: 0.75rem;
-}
-
 .site-nav {
   display: flex;
   gap: 0.25rem;
@@ -290,7 +289,7 @@ small {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  color: #c1c7d1;
+  color: white;
   padding: 0.65rem 0.9rem;
   border-radius: var(--radius);
   font-size: 0.875rem;
@@ -305,12 +304,8 @@ small {
   text-decoration: none;
 }
 
-.site-nav a[aria-current="page"] {
-  box-shadow: inset 0 -2px #84adff;
-}
-
 .page {
-  padding: 0.75rem 0 4rem;
+  padding: 0.75rem 0;
   flex: 1;
 }
 
@@ -404,8 +399,6 @@ small {
 }
 
 .site-footer {
-  border-top: 1px solid var(--line);
-  background: white;
   color: var(--muted);
   font-size: 0.8125rem;
 }
@@ -420,7 +413,8 @@ small {
 }
 
 .footer-inner {
-  padding-block: 1.5rem;
+  padding-block: 0.5rem;
+  justify-content: flex-end;
 }
 
 .footer-inner a {
@@ -473,7 +467,7 @@ body.modal-open {
 .flash-info {
   border-left-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent-deep);
+  color: var(--text);
 }
 
 .section {
@@ -598,7 +592,7 @@ h2 {
 
 .inline-details summary {
   cursor: pointer;
-  color: var(--accent);
+  color: var(--text);
   font-weight: 600;
   list-style: revert;
 }
@@ -607,8 +601,14 @@ h2 {
   display: inline;
 }
 
-.admin-danger-zone {
+.section.admin-danger-zone {
   border-bottom: 0;
+  padding-block: 1rem;
+}
+
+.section.admin-email-panel {
+  border-bottom: 0;
+  padding-block: 1rem 0;
 }
 
 .admin-danger-zone details {
@@ -661,8 +661,14 @@ button.danger-subtle:hover {
   width: 100%;
 }
 
-.archive-dropdown {
+.link-list.archive-dropdown {
   margin-top: 1rem;
+  gap: 0;
+}
+
+.section.past-tournaments {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .tab-row {
@@ -693,7 +699,7 @@ button.danger-subtle:hover {
 
 .tab-row a.is-active {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--text);
 }
 
 .pagination-link {
@@ -707,7 +713,7 @@ button.danger-subtle:hover {
 .pagination-link.is-active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent-deep);
+  color: var(--text);
 }
 
 .pagination-row {
@@ -739,7 +745,7 @@ button.danger-subtle:hover {
 }
 
 .sort-toggle:hover {
-  color: var(--accent);
+  color: var(--text);
   background: var(--accent-soft);
 }
 
@@ -748,6 +754,11 @@ button.danger-subtle:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
   align-items: end;
+  margin-bottom: 1rem;
+}
+
+.player-search {
+  max-width: 18rem;
 }
 
 .member-toolbar-form {
@@ -798,7 +809,7 @@ button.danger-subtle:hover {
 }
 
 .link-list a.is-current span {
-  color: var(--accent-deep);
+  color: var(--text);
   font-weight: 700;
 }
 
@@ -853,7 +864,7 @@ td a {
 }
 
 td a:hover {
-  color: var(--accent);
+  color: var(--text);
 }
 
 .compact-table th,
@@ -1039,13 +1050,13 @@ td form + form {
 
 .pairing-result-button:hover {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--text);
 }
 
 .pairing-result-button.is-selected {
   border-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent-deep);
+  color: var(--text);
 }
 
 .pairing-edit {
@@ -1090,7 +1101,7 @@ td form + form {
 }
 
 .round-cell-pending {
-  color: var(--accent);
+  color: var(--text);
 }
 
 .round-cell-idle,
@@ -1281,7 +1292,7 @@ tr.is-waitlist .waitlist-note {
 
 .autocomplete-option:hover {
   background: var(--accent-soft);
-  color: var(--accent-deep);
+  color: var(--text);
 }
 
 .autocomplete-option:last-child {
@@ -1395,7 +1406,7 @@ tr.is-waitlist .waitlist-note {
   padding: 0.25rem 0.55rem;
   border-radius: 4px;
   background: #e9ebef;
-  color: #565d67;
+  color: var(--text);
   font-size: 0.75rem;
   font-weight: 700;
   line-height: 1.5;
@@ -1548,7 +1559,7 @@ tr.is-waitlist .waitlist-note {
 
 .rank-podium {
   background: #f6edce;
-  color: #795710;
+  color: var(--text);
   border-radius: 4px;
 }
 
@@ -1569,7 +1580,7 @@ tr.is-waitlist .waitlist-note {
 }
 
 .leaderboard-table td:nth-child(3) {
-  color: var(--accent-deep);
+  color: var(--text);
 }
 
 .leaderboard-table td:nth-child(4) {
@@ -1893,15 +1904,19 @@ tr.is-waitlist .waitlist-note {
   }
 
   .public-table .card-rank {
-    position: absolute;
-    top: 0.75rem;
-    left: 0.75rem;
+    position: static;
+    display: flex;
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+    align-self: center;
   }
 
   .public-table .card-name {
     display: flex;
     align-items: center;
     grid-column: 1 / -1;
+    grid-row: 1;
     min-height: 2rem;
     padding-left: 2.5rem;
     font-size: 1rem;
@@ -1940,6 +1955,11 @@ tr.is-waitlist .waitlist-note {
   .public-boards-table .public-result-col {
     grid-area: result;
     justify-self: end;
+  }
+
+  .public-table .result-label {
+    min-width: 0;
+    text-align: right;
   }
 
   .public-boards-table .public-score-white {
@@ -1983,6 +2003,8 @@ tr.is-waitlist .waitlist-note {
 
   .public-history-table [data-label="Result"] {
     grid-area: result;
+    justify-self: end;
+    text-align: right;
   }
 }
 
@@ -2000,7 +2022,7 @@ tr.is-waitlist .waitlist-note {
 .pairing-result-controls { display: grid; gap: 0.3rem; justify-items: center; }
 .pairing-result-options { position: relative; font-size: 0.8rem; }
 .pairing-result-options summary { cursor: pointer; color: var(--muted); }
-.pairing-result-options summary.is-forfeit { color: var(--accent-deep); font-weight: 700; }
+.pairing-result-options summary.is-forfeit { color: var(--text); font-weight: 700; }
 .pairing-result-menu {
   position: absolute; z-index: 5; left: 50%; transform: translateX(-50%);
   display: grid; gap: 0.4rem; width: 14rem; padding: 0.65rem;

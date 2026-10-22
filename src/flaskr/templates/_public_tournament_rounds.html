@@ -1,12 +1,12 @@
 <section class="section">
   <nav class="tab-row view-tabs" aria-label="Tournament view">
     {% if selected_round %}
-      <a class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='boards') }}">Rounds</a>
+      <a data-public-navigation data-view="boards" data-round-no="{{ selected_round }}" class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='boards') }}">Rounds</a>
     {% else %}
-      <a class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament', slug=tournament.slug, view='boards') }}">Rounds</a>
+      <a data-public-navigation data-view="boards" data-round-no="" class="{% if view_mode == 'boards' %}is-active{% endif %}" href="{{ url_for('web.public_tournament', slug=tournament.slug, view='boards') }}">Rounds</a>
     {% endif %}
     {% if can_view_results %}
-      <a class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='standings') if selected_round and not is_admin else url_for('web.public_tournament', slug=tournament.slug, view='standings') }}">{{ 'Latest standings' if is_admin else 'Standings' }}</a>
+      <a data-public-navigation data-view="standings" data-round-no="{{ selected_round if selected_round and not is_admin else '' }}" class="{% if view_mode == 'standings' %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=selected_round, view='standings') if selected_round and not is_admin else url_for('web.public_tournament', slug=tournament.slug, view='standings') }}">{{ 'Latest standings' if is_admin else 'Standings' }}</a>
     {% endif %}
   </nav>
 
@@ -24,14 +24,11 @@
   {% if view_mode == "boards" %}
     <div class="section-heading">
       <h2>{% if selected_round %}Round {{ selected_round }}{% else %}Rounds{% endif %}</h2>
-      {% if latest_round %}
-        <small>Latest published round: {{ latest_round }}</small>
-      {% endif %}
     </div>
     {% if round_numbers %}
       <nav class="tab-row round-tabs" aria-label="Rounds">
         {% for round_no in round_numbers %}
-          <a class="{% if round_no == selected_round %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=round_no, view='boards') }}">Round {{ round_no }}</a>
+          <a data-public-navigation data-view="boards" data-round-no="{{ round_no }}" class="{% if round_no == selected_round %}is-active{% endif %}" href="{{ url_for('web.public_tournament_round', slug=tournament.slug, round_no=round_no, view='boards') }}">Round {{ round_no }}</a>
         {% endfor %}
       </nav>
     {% endif %}

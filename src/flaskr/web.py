@@ -297,6 +297,9 @@ def _public_rounds_fragment_response(tournament, selected_round: int | None):
                 "web.public_tournament_round", slug=tournament["slug"],
                 round_no=context["selected_round"], view=context["view_mode"],
             ) if context["selected_round"] is not None else None,
+            "selected_round": context["selected_round"],
+            "latest_round": context["latest_round"],
+            "view": context["view_mode"],
         }
     )
 
@@ -626,7 +629,7 @@ def _round_panels(tournament, entries, availability):
             for entry in entries
             if entry["waitlist_position"] is None or entry["id"] in paired_ids
         ]
-        editable_pool.sort(key=lambda row: (-row["seed_rating"], row["imported_name"].lower()))
+        editable_pool.sort(key=lambda row: row["imported_name"].casefold())
         board_count = len(current_pairings)
         if not tournament["is_historical"]:
             available_count = sum(
@@ -878,6 +881,8 @@ def _submit_team_registration(tournament, admin: bool = False):
     db = get_db()
     destination = url_for("web.admin_tournament_detail", slug=tournament["slug"]) if admin else url_for("web.register")
     if tournament["status"] == "completed":
+        if admin and _wants_json():
+            return jsonify(ok=False, message="This tournament is finished."), 400
         flash_error("This tournament is finished.")
         return redirect(destination)
     mode = request.form.get("registration_mode", "team")
@@ -903,13 +908,18 @@ def _submit_team_registration(tournament, admin: bool = False):
         db.commit()
     except (ValueError, sqlite3.IntegrityError) as exc:
         db.rollback()
-        flash_error(str(exc) if isinstance(exc, ValueError) else "A member is already registered for this tournament.")
+        message = str(exc) if isinstance(exc, ValueError) else "A member is already registered for this tournament."
+        if admin and _wants_json():
+            return jsonify(ok=False, message=message), 400
+        flash_error(message)
         return redirect(destination)
     if entry_id is not None:
         ensure_entry_round_status_rows(db, entry_id, tournament["rounds_planned"], (latest_paired_round(db, tournament["id"]) or 0) + 1)
     if not admin:
         for email in emails:
             send_registration_email(tournament, {"name": name, "email": email}, waitlist_position, solo=solo)
+    if admin and _wants_json():
+        return jsonify(ok=True, message=f"Added {name}.", html=_render_admin_tournament(tournament["slug"]))
     if waitlist_position is not None:
         flash_warning(f"{name} is on the waiting list in position {waitlist_position}.")
     elif solo:
@@ -990,7 +1000,7 @@ def admin():
 
     db = get_db()
     active_tab = _selected_admin_tab()
-    members = list_member_directory(db)
+    members = list_member_directory(db) if active_tab == "members" else []
     member_query = (request.args.get("member_q") or "").strip()
     if member_query:
         needle = member_query.casefold()
@@ -1162,14 +1172,17 @@ def admin_player_suggestions():
 @login_required
 def add_entry(slug: str):
     db = get_db()
-    sync_member_statuses(db)
     tournament = _tournament_or_404(slug)
     if not _ensure_editable(tournament):
+        if _wants_json():
+            return jsonify(ok=False, message="Imported historical tournaments are read-only."), 400
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
     if tournament["is_team"]:
         return _submit_team_registration(tournament, admin=True)
     name = (request.form.get("name") or "").strip()
     if not name:
+        if _wants_json():
+            return jsonify(ok=False, message="Player name is required."), 400
         flash_error("Player name is required.")
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
     row = {
@@ -1181,12 +1194,16 @@ def add_entry(slug: str):
     registration_fields = parse_registration_form_fields(tournament["registration_form_json"])
     registration_answers, registration_error = _registration_answers_from_request(registration_fields)
     if registration_error:
+        if _wants_json():
+            return jsonify(ok=False, message=registration_error), 400
         flash_error(registration_error)
         return redirect(url_for("web.admin_tournament_detail", slug=slug))
     row["registration_answers_json"] = (
         json.dumps(registration_answers, ensure_ascii=True) if registration_answers else None
     )
     attach_entries_to_tournament(db, tournament["id"], [row], build_matcher(), default_active=True)
+    if _wants_json():
+        return jsonify(ok=True, message=f"Added {name}.", html=_render_admin_tournament(slug))
     flash_success(f"Added {name}.")
     return redirect(url_for("web.admin_tournament_detail", slug=slug))
 
@@ -1475,7 +1492,6 @@ def _render_admin_tournament(slug: str, *, email_form: dict | None = None):
         paired_team_ids=paired_team_ids,
         waiting_registrations=waiting_registrations,
         team_member_answers={member["id"]: _parse_registration_answers(member["registration_answers_json"]) for member in members},
-        registration_summary=registration_counts(db, tournament["id"]),
         availability=availability,
         standings=standings,
         standings_by_entry=standings_by_entry,

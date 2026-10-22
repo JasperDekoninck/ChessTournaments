@@ -5,55 +5,73 @@ const initPublicLiveUpdates = () => {
   }
 
   let currentVersion = root.dataset.liveVersion || "";
-  let inFlight = false;
-  const followLatestRound = root.dataset.liveView === "boards" && (
-    !root.dataset.liveRoundNo || root.dataset.liveRoundNo === root.dataset.liveLatestRound
-  );
-
-  const liveUrl = () => {
-    const url = new URL(root.dataset.liveUrl, window.location.origin);
-    const view = root.dataset.liveView || "";
-    const roundNo = root.dataset.liveRoundNo || "";
-    if (view) {
-      url.searchParams.set("view", view);
-    }
-    if (roundNo && !followLatestRound) {
-      url.searchParams.set("round_no", roundNo);
-    }
-    return url;
+  let controller = null;
+  const currentSelection = () => ({
+    view: root.dataset.liveView || "boards",
+    roundNo: root.dataset.liveRoundNo || "",
+  });
+  const rememberSelection = (method, selection, url) => {
+    window.history[method]({ ...window.history.state, publicRound: selection }, "", url);
   };
+  rememberSelection("replaceState", currentSelection(), window.location.href);
 
-  const refresh = async () => {
-    if (inFlight || document.hidden) {
-      return;
-    }
-    inFlight = true;
+  const refresh = async (selection = currentSelection(), navigation = null) => {
+    if (!navigation && (controller || document.hidden)) return;
+    controller?.abort();
+    const requestController = new AbortController();
+    controller = requestController;
+    const followLatestRound = selection.view === "boards" && (
+      !selection.roundNo || selection.roundNo === root.dataset.liveLatestRound
+    );
+    const url = new URL(root.dataset.liveUrl, window.location.origin);
+    url.searchParams.set("view", selection.view);
+    if (selection.roundNo && !followLatestRound) url.searchParams.set("round_no", selection.roundNo);
+    if (navigation) root.setAttribute("aria-busy", "true");
     try {
-      const response = await fetch(liveUrl(), {
-        headers: {
-          "X-Requested-With": "XMLHttpRequest",
-        },
+      const response = await fetch(url, {
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        signal: requestController.signal,
       });
-      if (!response.ok) {
-        return;
-      }
+      if (!response.ok) throw new Error("Could not load this round.");
       const payload = await response.json();
-      if (!payload.version || payload.version === currentVersion || typeof payload.html !== "string") {
-        return;
+      if (controller !== requestController) return;
+      if (!payload.version || typeof payload.html !== "string") throw new Error("Invalid round response.");
+      root.dataset.liveView = payload.view;
+      root.dataset.liveLatestRound = String(payload.latest_round || "");
+      root.dataset.liveRoundNo = selection.roundNo
+        ? String(followLatestRound ? payload.selected_round || "" : selection.roundNo) : "";
+      if (payload.version !== currentVersion) {
+        const { scrollX, scrollY } = window;
+        root.innerHTML = payload.html;
+        window.scrollTo({ left: scrollX, top: scrollY, behavior: "instant" });
+        currentVersion = payload.version;
       }
-      currentVersion = payload.version;
-      root.innerHTML = payload.html;
-      if (followLatestRound && root.dataset.liveRoundNo && payload.round_url) {
-        window.history.replaceState(window.history.state, "", payload.round_url);
+      if (navigation?.push) {
+        rememberSelection("pushState", currentSelection(), navigation.url);
+      } else if (!navigation && followLatestRound && selection.roundNo && payload.round_url) {
+        rememberSelection("replaceState", currentSelection(), payload.round_url);
       }
     } catch (error) {
-      return;
+      if (error.name !== "AbortError" && navigation) window.location.assign(navigation.url);
     } finally {
-      inFlight = false;
+      if (controller === requestController) {
+        controller = null;
+        root.removeAttribute("aria-busy");
+      }
     }
   };
 
-  window.setInterval(refresh, 5000);
+  root.addEventListener("click", (event) => {
+    const link = event.target.closest("a[data-public-navigation]");
+    if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+        || link.target || link.hasAttribute("download")) return;
+    event.preventDefault();
+    refresh({ view: link.dataset.view, roundNo: link.dataset.roundNo }, { url: link.href, push: true });
+  });
+  window.addEventListener("popstate", (event) => {
+    if (event.state?.publicRound) refresh(event.state.publicRound, { url: window.location.href });
+  });
+  window.setInterval(() => refresh(), 5000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       refresh();

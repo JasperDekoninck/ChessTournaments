@@ -4,10 +4,8 @@
 {% block title %}{{ tournament.name }} · Admin{% endblock %}
 {% block content %}
 <section class="section admin-event-heading">
-  <a class="back-link" href="{{ url_for('web.admin', tab='tournaments') }}">{{ icon('archive') }} All tournaments</a>
   <div class="section-heading">
     <div>
-      <p class="kicker">Tournament admin</p>
       <h1>{{ tournament.name }}</h1>
     </div>
     <div class="inline-actions">
@@ -150,6 +148,11 @@
         {% if panel.round_no != open_round %}hidden{% endif %}
       >
         <div class="round-panel-body">
+          <template data-pairing-options data-admin-refresh="round-options-{{ panel.round_no }}">
+            {% for entry in panel.entries %}
+              <option value="{{ entry.id }}">{{ entry.imported_name }}</option>
+            {% endfor %}
+          </template>
           <div class="section-heading">
             <h3>Round {{ panel.round_no }}</h3>
             <small>{{ panel.board_count }} boards{% if panel.round_no == next_round and not panel.has_pairings %} · ready to pair{% endif %}</small>
@@ -169,7 +172,7 @@
             </div>
           {% endif %}
 
-          <p class="muted" data-round-lock-reason {% if not panel.lock_reason %}hidden{% endif %}>{{ panel.lock_reason or '' }}</p>
+          <p class="muted" data-round-lock-reason {% if not panel.lock_reason or tournament.is_historical or tournament.status == 'completed' %}hidden{% endif %}>{% if not tournament.is_historical and tournament.status != 'completed' %}{{ panel.lock_reason or '' }}{% endif %}</p>
           {% if panel.board_count == 0 %}
             <p class="muted">Not enough available players in this round.</p>
           {% else %}
@@ -194,9 +197,7 @@
                         <div class="pairing-edit">
                           <select name="white_{{ board.board_no }}">
                             <option value="">Choose white</option>
-                            {% for entry in panel.entries %}
-                              <option value="{{ entry.id }}" {% if board.white_entry_id == entry.id %}selected{% endif %}>{{ entry.imported_name }}</option>
-                            {% endfor %}
+                            {% if board.white_entry_id %}<option value="{{ board.white_entry_id }}" selected>{{ board.white_name }}</option>{% endif %}
                           </select>
                         </div>
                       {% endif %}
@@ -208,9 +209,7 @@
                         <div class="pairing-edit">
                           <select name="black_{{ board.board_no }}">
                             <option value="">Bye / empty</option>
-                            {% for entry in panel.entries %}
-                              <option value="{{ entry.id }}" {% if board.black_entry_id == entry.id %}selected{% endif %}>{{ entry.imported_name }}</option>
-                            {% endfor %}
+                            {% if board.black_entry_id %}<option value="{{ board.black_entry_id }}" selected>{{ board.black_name }}</option>{% endif %}
                           </select>
                         </div>
                       {% endif %}
@@ -230,9 +229,6 @@
                       <div class="pairing-edit">
                         <select name="white___BOARD__">
                           <option value="">Choose white</option>
-                          {% for entry in panel.entries %}
-                            <option value="{{ entry.id }}">{{ entry.imported_name }}</option>
-                          {% endfor %}
                         </select>
                       </div>
                     </div>
@@ -242,9 +238,6 @@
                       <div class="pairing-edit">
                         <select name="black___BOARD__">
                           <option value="">Bye / empty</option>
-                          {% for entry in panel.entries %}
-                            <option value="{{ entry.id }}">{{ entry.imported_name }}</option>
-                          {% endfor %}
                         </select>
                       </div>
                     </div>
@@ -263,7 +256,9 @@
 <section class="section">
   <div class="section-heading">
     <h2>{{ "Teams" if tournament.is_team else "Players" }}</h2>
+    <input type="search" class="player-search" placeholder="Find by name" aria-label="Find {{ 'teams' if tournament.is_team else 'players' }} by name" data-player-filter>
   </div>
+  <p role="status" data-player-filter-empty hidden>No matching players.</p>
   <div class="table-wrap">
     <table>
       <thead>
@@ -289,7 +284,7 @@
           {% endfor %}
         </tr>
       </thead>
-      <tbody data-player-table-body>
+      <tbody data-player-table-body data-admin-refresh="players">
         {% for entry in entries %}
           {% set standing = standings_by_entry.get(entry.id) %}
           <tr
@@ -357,7 +352,7 @@
   </div>
 
   {% if not tournament.is_historical %}
-    <form method="post" action="{{ url_for('web.add_entry', slug=tournament.slug) }}" class="stack-form centered-form add-player-form" {{ 'data-team-registration' if tournament.is_team else 'data-player-search' }}>
+    <form method="post" action="{{ url_for('web.add_entry', slug=tournament.slug) }}" class="stack-form centered-form add-player-form" data-add-player {{ 'data-team-registration' if tournament.is_team else 'data-player-search' }}>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       {% if tournament.is_team %}
         <h3>Add registration</h3>
@@ -396,6 +391,7 @@
         </label>
       {% endfor %}
       <button type="submit">{{ "Add registration" if tournament.is_team else "Add player" }}</button>
+      <p role="status" data-add-player-status hidden></p>
     </form>
   {% endif %}
 
@@ -418,7 +414,7 @@
               {% endfor %}
             </tr>
           </thead>
-          <tbody>
+          <tbody data-admin-refresh="player-information">
             {% for row in player_information_rows %}
               {% set entry = row.entry %}
               <tr>
@@ -443,34 +439,8 @@
 </section>
 
 {% if tournament.is_team %}
-  {% include "_admin_team_members.html" %}
+  <div data-admin-refresh="team-members">{% include "_admin_team_members.html" %}</div>
 {% endif %}
-
-<section class="section admin-danger-zone">
-  <details>
-    <summary>Advanced actions</summary>
-    <div class="inline-actions danger-actions">
-      {% if not tournament.is_historical %}
-        <form
-          method="post"
-          action="{{ url_for('web.reset_tournament_registrations', slug=tournament.slug) }}"
-          data-confirm="Reset all registrations, waitlist entries, pairings, and results for this tournament? Registration settings will be kept."
-        >
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="secondary tiny danger-subtle">Reset registrations</button>
-        </form>
-      {% endif %}
-      <form
-        method="post"
-        action="{{ url_for('web.delete_tournament', slug=tournament.slug) }}"
-        data-confirm="Delete this tournament permanently? This cannot be undone."
-      >
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="secondary tiny danger-subtle">Delete tournament</button>
-      </form>
-    </div>
-  </details>
-</section>
 
 <section class="section admin-email-panel">
   <details{% if email_form %} open{% endif %}>
@@ -499,6 +469,32 @@
   </details>
 </section>
 
+<section class="section admin-danger-zone">
+  <details>
+    <summary>Advanced actions</summary>
+    <div class="inline-actions danger-actions">
+      {% if not tournament.is_historical %}
+        <form
+          method="post"
+          action="{{ url_for('web.reset_tournament_registrations', slug=tournament.slug) }}"
+          data-confirm="Reset all registrations, waitlist entries, pairings, and results for this tournament? Registration settings will be kept."
+        >
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="secondary tiny danger-subtle">Reset registrations</button>
+        </form>
+      {% endif %}
+      <form
+        method="post"
+        action="{{ url_for('web.delete_tournament', slug=tournament.slug) }}"
+        data-confirm="Delete this tournament permanently? This cannot be undone."
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="secondary tiny danger-subtle">Delete tournament</button>
+      </form>
+    </div>
+  </details>
+</section>
+
 {% if not tournament.is_historical %}
   <div class="modal-backdrop" hidden data-modal="registration-settings">
     <div class="modal-card modal-wide">
@@ -512,7 +508,7 @@
           Number of rounds
           <input type="number" name="rounds_planned" min="{{ latest_round or 1 }}" max="15" step="1" value="{{ tournament.rounds_planned }}" required {% if tournament.status == 'completed' %}readonly{% endif %}>
         </label>
-        <p class="muted">{% if tournament.status == 'completed' %}The round count is fixed for finished tournaments.{% else %}You can add rounds or remove rounds that do not yet have pairings.{% endif %}</p>
+        {% if tournament.status != 'completed' %}<p class="muted">You can add rounds or remove rounds that do not yet have pairings.</p>{% endif %}
         <label class="checkbox-row">
           <input type="checkbox" name="excludes_rating" value="1" {% if tournament.excludes_rating %}checked{% endif %}>
           <span>Exclude from ratings and rating-based prizes</span>
@@ -531,25 +527,6 @@
         <button type="submit">Save tournament settings</button>
       </form>
       <h3>Registration settings</h3>
-      <p class="lede">
-        {{ "Visible on the registration page" if tournament.registration_enabled and tournament.registration_opens_at else "Hidden from the registration page" }}
-        {% if tournament.registration_opens_at %}
-          · opens at {{ tournament.registration_opens_at|registration_local_time }} (Europe/Zurich)
-        {% endif %}
-        {% if tournament.event_time %}
-          · starts at {{ tournament.event_time }}
-        {% endif %}
-        {% if tournament.venue %}
-          · {{ tournament.venue }}
-        {% endif %}
-        · {{ registration_summary.confirmed_count|round(2) }} {{ "teams confirmed" if tournament.is_team else "confirmed" }}
-        {% if tournament.max_registrations %}
-          / {{ tournament.max_registrations }} max
-        {% endif %}
-        {% if registration_summary.waitlist_count %}
-          · {{ registration_summary.waitlist_count }} on the waiting list
-        {% endif %}
-      </p>
       <form method="post" action="{{ url_for('web.update_tournament_registration', slug=tournament.slug) }}" class="stack-form modal-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label class="checkbox-row">
@@ -560,7 +537,6 @@
           Registration opens at (Europe/Zurich)
           <input type="datetime-local" name="registration_opens_at" value="{{ tournament.registration_opens_at|registration_local_time }}">
         </label>
-        <p class="muted">Zurich local time (CET/CEST), regardless of the server or browser timezone.</p>
         <label>
           Start time
           <input type="time" name="event_time" value="{{ tournament.event_time or '' }}">
@@ -608,7 +584,6 @@
               </div>
             {% endfor %}
           </div>
-          <p class="muted" data-registration-fields-empty{% if registration_fields %} hidden{% endif %}>No extra fields yet.</p>
           <template data-registration-field-template="text">
             <div class="custom-field-card" data-registration-field>
               <div class="section-heading">

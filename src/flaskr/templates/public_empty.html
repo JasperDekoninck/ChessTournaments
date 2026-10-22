@@ -3,13 +3,12 @@
 {% block title %}Current Tournament{% endblock %}
 {% block content %}
 <section class="section public-empty-hero">
-  <p class="kicker">Current tournament</p>
   <h1>No tournament in progress</h1>
   <a class="button-link empty-state-action" href="{{ url_for('web.register') }}">Upcoming tournaments {{ icon('arrow-right') }}</a>
 </section>
 
 {% if tournaments %}
-  <section class="section">
+  <section class="section past-tournaments">
     <details class="inline-details archive-disclosure">
       <summary>Past tournaments</summary>
       <div class="link-list archive-dropdown">

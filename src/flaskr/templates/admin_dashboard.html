@@ -28,7 +28,7 @@
 
 <section class="section"{% if active_tab != 'rating' %} hidden{% endif %}>
   <div class="section-heading"><h2>Rating</h2></div>
-  <p>Rebuild ratings from the original saved games and all completed rated tournaments, in chronological order. Each tournament is included once. The website keeps showing the previous ratings while the rebuild runs.</p>
+  <p>Rebuild ratings from the original saved games and all completed rated tournaments, in chronological order.</p>
   <form method="post" action="{{ url_for('web.admin_rebuild_ratings') }}" class="stack-form centered-form" data-rating-rebuild>
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <button type="submit" {% if rating_job and rating_job.status in ['queued', 'running'] %}disabled{% endif %}>Rebuild all ratings</button>

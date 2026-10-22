@@ -503,11 +503,11 @@ class TournamentFormatsTestCase(unittest.TestCase):
         for text in (
             "Hello Taylor,", "Your registration is confirmed.",
             "You will be paired with another player at the tournament.",
-            "Tournament: Team Cup", "Date: 2026-09-18", "Membership is free this year",
+            "Tournament: Team Cup", "Date: 2026-09-18",
         ):
             self.assertIn(text, messages[0]["body"])
         self.assertNotIn("awaiting", messages[0]["body"])
-        self.assertIn(b"0.5 teams confirmed", self.client.get(f"/admin/t/{slug}").data)
+        self.assertNotIn(b"Hidden from the registration page", self.client.get(f"/admin/t/{slug}").data)
 
     def test_assigning_confirmed_solos_at_capacity_preserves_count_and_status(self):
         slug = self.create_tournament(capacity="2")

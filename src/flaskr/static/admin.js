@@ -10,11 +10,18 @@ const ready = () => {
   initMemberDirectoryPagination();
   initMemberStatusToggles();
   initPlayerSearch();
+  initAddPlayerForm();
   initPlayerSorting();
+  initPlayerFilter();
   initEntryToggles();
   initMemberPresence();
   initAvailabilityToggles();
   initModals();
+  document.addEventListener("click", (event) => {
+    document.querySelectorAll("[data-pairing-row].is-editing").forEach((row) => {
+      if (!row.contains(event.target)) row.classList.remove("is-editing");
+    });
+  });
 };
 
 const initRatingJob = () => {
@@ -28,7 +35,7 @@ const initRatingJob = () => {
       if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return;
       const { job } = await response.json();
       if (!job) return;
-      panel.hidden = false;
+      panel.hidden = job.status === "completed";
       panel.querySelector("[data-rating-job-message]").textContent = job.message;
       panel.classList.toggle("flash-warning", job.status === "failed");
       panel.classList.toggle("flash-info", job.status !== "failed");
@@ -49,6 +56,8 @@ const initRatingJob = () => {
 
 const initConfirmForms = () => {
   document.querySelectorAll("form[data-confirm]").forEach((form) => {
+    if (form.dataset.boundConfirm) return;
+    form.dataset.boundConfirm = "1";
     form.addEventListener("submit", (event) => {
       if (!window.confirm(form.dataset.confirm || "Are you sure?")) {
         event.preventDefault();
@@ -292,6 +301,9 @@ const applyEntryUpdates = (roundNo, entryUpdates) => {
 
 const bindPairingRow = (form, row, openRow) => {
   updatePairingDisplay(row);
+  row.querySelectorAll('select[name^="white_"], select[name^="black_"]').forEach((select) => {
+    select.addEventListener("focus", () => populatePairingOptions(select));
+  });
   row.querySelectorAll("[data-pairing-field]").forEach((field) => {
     field.addEventListener("click", (event) => {
       if (event.target.closest("select")) {
@@ -352,6 +364,8 @@ const bindPairingRow = (form, row, openRow) => {
 
 const initRoundEditors = () => {
   document.querySelectorAll(".autosave-round-form").forEach((form) => {
+    if (form.dataset.boundRoundEditor) return;
+    form.dataset.boundRoundEditor = "1";
     let timer = null;
     const renumberRows = () => {
       const rows = Array.from(form.querySelectorAll("[data-pairing-row]"));
@@ -383,6 +397,7 @@ const initRoundEditors = () => {
     };
     const openRow = (row) => {
       closeRows();
+      row.querySelectorAll('select[name^="white_"], select[name^="black_"]').forEach(populatePairingOptions);
       row.classList.add("is-editing");
     };
 
@@ -481,11 +496,6 @@ const initRoundEditors = () => {
       timer = window.setTimeout(() => { timer = null; save(); }, 180);
     });
 
-    document.addEventListener("click", (event) => {
-      if (!form.contains(event.target) || !event.target.closest("[data-pairing-row]")) {
-        closeRows();
-      }
-    });
   });
 };
 
@@ -628,6 +638,85 @@ const initMemberStatusToggles = () => {
   });
 };
 
+const populatePairingOptions = (select) => {
+  if (select.dataset.optionsLoaded) return;
+  const template = select.closest("[data-round-panel]")?.querySelector("[data-pairing-options]");
+  if (!template) return;
+  const value = select.value;
+  const label = select.selectedOptions[0]?.textContent;
+  select.replaceChildren(select.options[0].cloneNode(true), template.content.cloneNode(true));
+  select.value = value;
+  if (value && select.selectedIndex < 0) select.add(new Option(label, value, true, true));
+  select.dataset.optionsLoaded = "1";
+};
+
+const initAddPlayerForm = () => {
+  const form = document.querySelector("[data-add-player]");
+  if (!form) return;
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    if (button.disabled) return;
+    const status = form.querySelector("[data-add-player-status]");
+    button.disabled = true;
+    status.hidden = false;
+    status.classList.remove("save-error");
+    status.textContent = "Adding…";
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        body: new FormData(form),
+      });
+      if (!response.headers.get("content-type")?.includes("application/json")) {
+        throw new Error("Please sign in again, then retry adding this registration.");
+      }
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.message || "Could not add this registration.");
+      const updated = new DOMParser().parseFromString(payload.html, "text/html");
+      const anchor = form.getBoundingClientRect().top;
+      // Keep live result editors intact; empty rounds can pick up additional boards.
+      updated.querySelectorAll("[data-round-panel]").forEach((incoming) => {
+        const panel = document.getElementById(incoming.id);
+        if (panel?.dataset.hasPairings === "0" && !panel.querySelector('[data-save-pending="1"], .is-editing')) {
+          panel.innerHTML = incoming.innerHTML;
+        }
+      });
+      updated.querySelectorAll("[data-admin-refresh]").forEach((incoming) => {
+        const existing = document.querySelector(`[data-admin-refresh="${incoming.dataset.adminRefresh}"]`);
+        if (existing) existing.innerHTML = incoming.innerHTML;
+      });
+      document.querySelectorAll('select[data-options-loaded]').forEach((select) => {
+        delete select.dataset.optionsLoaded;
+        populatePairingOptions(select);
+      });
+      initRoundEditors();
+      initEntryToggles();
+      initAvailabilityToggles();
+      initMemberPresence();
+      initConfirmForms();
+      applyActivePlayerSort();
+      applyPlayerFilter();
+      document.dispatchEvent(new Event("admin:entries-updated"));
+      const mode = form.querySelector("[data-registration-mode]");
+      const registrationMode = mode?.value;
+      form.reset();
+      if (mode) mode.value = registrationMode;
+      form.querySelector("[data-player-results]")?.setAttribute("hidden", "");
+      form.dispatchEvent(new Event("change", { bubbles: true }));
+      status.textContent = payload.message;
+      const nameInput = form.querySelector('[name="name"]:not(:disabled), [name="team_name"]:not(:disabled)');
+      nameInput?.focus({ preventScroll: true });
+      window.scrollBy({ top: form.getBoundingClientRect().top - anchor, behavior: "instant" });
+    } catch (error) {
+      status.classList.add("save-error");
+      status.textContent = error.message || "Could not add this registration. Please check before retrying.";
+    } finally {
+      button.disabled = false;
+    }
+  });
+};
+
 const initPlayerSearch = () => {
   document.querySelectorAll("[data-player-search]").forEach((form) => {
     const nameInput = form.querySelector("[data-player-name]");
@@ -693,6 +782,20 @@ const initPlayerSearch = () => {
       }
     });
   });
+};
+
+let applyPlayerFilter = () => {};
+
+const initPlayerFilter = () => {
+  const input = document.querySelector("[data-player-filter]");
+  if (!input) return;
+  applyPlayerFilter = () => {
+    const query = input.value.trim().toLocaleLowerCase();
+    const rows = Array.from(document.querySelectorAll("[data-player-table-body] tr[data-entry-id]"));
+    rows.forEach((row) => { row.hidden = !(row.dataset.playerName || "").toLocaleLowerCase().includes(query); });
+    document.querySelector("[data-player-filter-empty]").hidden = rows.some((row) => !row.hidden);
+  };
+  input.addEventListener("input", applyPlayerFilter);
 };
 
 const initPlayerSorting = () => {

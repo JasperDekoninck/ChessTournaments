@@ -8,10 +8,6 @@ from typing import Any
 from flask import current_app, url_for
 
 
-MEMBERSHIP_NOTE = """
-Membership is free this year, you will not have to pay to participate in the tournament.
-"""
-
 PUNCTUALITY_NOTE = "Please arrive on time so we can begin the tournament and publish pairings without delay. If you can't make it, please let us know so we can give your spot to the next person in the waiting list."
 
 
@@ -130,7 +126,6 @@ def registration_email_body(tournament, player_name: str, waitlist_position: int
         "",
         *_tournament_lines(tournament),
         "",
-        MEMBERSHIP_NOTE,
         WAITLIST_NOTE if waitlist_position is not None else PUNCTUALITY_NOTE,
         "",
         "Kind Regards,",
@@ -147,7 +142,6 @@ def waitlist_confirmation_email_body(tournament, player_name: str) -> str:
         "",
         *_tournament_lines(tournament),
         "",
-        MEMBERSHIP_NOTE,
         PUNCTUALITY_NOTE,
         "",
         "Kind Regards,",

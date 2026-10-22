@@ -3,10 +3,6 @@
 {% block title %}{{ tournament.name }}{% endblock %}
 {% block content %}
 <section class="section event-heading">
-  <div class="event-heading-top">
-    <p class="kicker">{% if show_as_home %}Current tournament{% elif tournament.is_historical %}Past tournament{% else %}Tournament{% endif %}</p>
-    <span class="event-badge {{ 'badge-success' if tournament.status != 'completed' and latest_round else '' }}">{{ 'Completed' if tournament.status == 'completed' else ('In progress' if latest_round else 'Awaiting pairings') }}</span>
-  </div>
   <h1>{{ tournament.name }}</h1>
   <div class="event-details event-details-inline">
     <span>{{ icon('calendar-days') }} {{ tournament.event_date }}</span>
@@ -34,7 +30,7 @@
       {% endif %}
       {% set first = podium[0] %}
       <article class="podium-slot podium-slot-first">
-        <small>{{ icon('trophy') }} 1st place</small>
+        <small>1st place</small>
         <strong><a href="{{ url_for('web.player_history', slug=tournament.slug, entry_id=first.entry_id) }}">{{ first.name }}</a></strong>
         <span>{{ "%.1f"|format(first.score) }}</span>
       </article>
@@ -83,7 +79,7 @@
   {% include "_public_tournament_rounds.html" %}
 </div>
 
-<section class="section">
+<section class="section past-tournaments">
   <details class="inline-details archive-disclosure">
     <summary>Past tournaments</summary>
     <div class="link-list archive-dropdown">

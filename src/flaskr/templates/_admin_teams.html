@@ -1,4 +1,4 @@
-<section class="section" id="awaiting-team">
+<section class="section" id="awaiting-team" data-admin-refresh="awaiting-team">
   {% set unassigned = team_members|selectattr('entry_id', 'none')|selectattr('waitlist_position', 'none')|list %}
   <div class="section-heading">
     <h2>Awaiting team</h2>

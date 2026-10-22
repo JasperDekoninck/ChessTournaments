@@ -1,4 +1,5 @@
-<section class="rating-job flash flash-{{ 'warning' if rating_job and rating_job.status == 'failed' else 'info' }}" data-rating-job data-status-url="{{ url_for('web.admin_rating_status') }}" data-version="{{ rating_job.requested_version if rating_job else 0 }}" data-status="{{ rating_job.status if rating_job else '' }}" aria-live="polite" {% if not rating_job %}hidden{% endif %}>
+{% if rating_job and rating_job.status != 'completed' %}
+<section class="rating-job flash flash-{{ 'warning' if rating_job.status == 'failed' else 'info' }}" data-rating-job data-status-url="{{ url_for('web.admin_rating_status') }}" data-version="{{ rating_job.requested_version }}" data-status="{{ rating_job.status }}" aria-live="polite">
   <strong>Rating update</strong>
   <p data-rating-job-message>{{ rating_job.message if rating_job else '' }}</p>
   <a href="{{ url_for('web.admin', tab='rating') }}">Open Rating</a>
@@ -7,3 +8,4 @@
     <button type="submit" class="secondary tiny">Retry rating rebuild</button>
   </form>
 </section>
+{% endif %}

@@ -240,7 +240,7 @@ class TournamentEmailTestCase(unittest.TestCase):
         self.assertEqual(self.send(csrf_token=token).status_code, 200)
         self.assertEqual(len(self.outbox()), 1)
 
-    def test_form_is_separate_collapsed_and_at_the_bottom(self):
+    def test_form_is_separate_collapsed_and_above_advanced_actions(self):
         response = self.client.get("/admin/t/cup")
         self.assertEqual(response.status_code, 200)
         elements = EmailFormParser(response.get_data(as_text=True)).elements
@@ -250,7 +250,7 @@ class TournamentEmailTestCase(unittest.TestCase):
         self.assertEqual(forms[0]["action"], "/admin/t/cup/email")
         section = next(i for i, (tag, attrs) in enumerate(elements) if tag == "section" and "admin-email-panel" in attrs.get("class", ""))
         self.assertEqual(elements[section + 1], ("details", {}))
-        self.assertGreater(response.data.index(b"Email participants"), response.data.index(b"Advanced actions"))
+        self.assertLess(response.data.index(b"Email participants"), response.data.index(b"Advanced actions"))
         inputs = {attrs["name"]: attrs for tag, attrs in elements if tag in {"input", "textarea", "select"} and "name" in attrs}
         self.assertIn("required", inputs["subject"])
         self.assertIn("required", inputs["message"])
