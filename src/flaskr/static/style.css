@@ -407,11 +407,17 @@ small {
 
 .footer-inner {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   gap: 1.25rem;
   flex-wrap: wrap;
   padding-block: 1.5rem;
+}
+
+.footer-inner nav {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
 }
 
 body.modal-open {
