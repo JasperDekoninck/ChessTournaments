@@ -1,10 +1,15 @@
 import json
 import os
+from functools import lru_cache
 
 from loguru import logger
 from typing import List
 
 class BaseClass:
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        BaseClass.find_class.cache_clear()
+
     def __init__(self, **kwargs) -> 'BaseClass':
         """
         Base class for providing a serialization and deserialization mechanism.
@@ -116,6 +121,7 @@ class BaseClass:
         return all_subclasses
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def find_class(cls_name : str):
         """
         Searches for a class that matches the given class name.

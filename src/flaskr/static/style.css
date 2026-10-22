@@ -399,31 +399,19 @@ small {
 }
 
 .site-footer {
+  border-top: 1px solid var(--line);
+  background: white;
   color: var(--muted);
   font-size: 0.8125rem;
 }
 
-.footer-inner,
-.footer-inner nav {
+.footer-inner {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 1.25rem;
   flex-wrap: wrap;
-}
-
-.footer-inner {
-  padding-block: 0.5rem;
-  justify-content: space-between;
-}
-
-.footer-inner a {
-  color: var(--muted);
-}
-
-.footer-separator {
-  margin-inline: 0.6rem;
-  color: var(--line-strong);
+  padding-block: 1.5rem;
 }
 
 body.modal-open {
@@ -476,7 +464,8 @@ body.modal-open {
   border-bottom: 1px solid var(--line);
 }
 
-.section.admin-dashboard-heading {
+.section.admin-dashboard-heading,
+.section.leaderboard-heading {
   padding-bottom: 0;
   border-bottom: 0;
 }
@@ -850,7 +839,7 @@ td {
 th {
   color: var(--muted);
   font-size: 0.75rem;
-  font-weight: 400;
+  font-weight: 700;
   background: #eff1f4;
   white-space: nowrap;
 }
@@ -1616,7 +1605,7 @@ tr.is-waitlist .waitlist-note {
 
 .podium-slot strong {
   font-size: 1.1rem;
-  font-weight: 500;
+  font-weight: 700;
   max-width: 100%;
   overflow-wrap: anywhere;
 }
