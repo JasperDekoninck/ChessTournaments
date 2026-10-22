@@ -445,7 +445,7 @@
 <section class="section admin-email-panel">
   <details{% if email_form %} open{% endif %}>
     <summary>Email participants</summary>
-    <form method="post" action="{{ url_for('web.email_tournament', slug=tournament.slug) }}" class="stack-form centered-form" data-tournament-email>
+    <form method="post" action="{{ url_for('web.email_tournament', slug=tournament.slug) }}" class="stack-form" data-tournament-email>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>
         Recipients
@@ -455,7 +455,6 @@
           <option value="both" {% if email_form.get('audience') == 'both' %}selected{% endif %}>Participants and waiting list</option>
         </select>
       </label>
-      <p class="muted">Participants include all confirmed registrations{% if tournament.is_team %}, including team members and solo players awaiting a team{% endif %}. Each address receives a separate email. Duplicate addresses and registrations without an email address are skipped.</p>
       <label>
         Subject
         <input type="text" name="subject" value="{{ email_form.get('subject', '') }}" maxlength="200" required>

@@ -414,7 +414,7 @@ small {
 
 .footer-inner {
   padding-block: 0.5rem;
-  justify-content: flex-end;
+  justify-content: space-between;
 }
 
 .footer-inner a {
@@ -629,6 +629,11 @@ h2 {
   font-weight: 600;
 }
 
+.admin-email-panel .stack-form {
+  max-width: none;
+  margin-top: 1rem;
+}
+
 .rating-job {
   margin-top: 1.5rem;
 }
@@ -805,12 +810,12 @@ button.danger-subtle:hover {
 }
 
 .link-list a > span {
-  font-weight: 700;
+  font-weight: 400;
 }
 
 .link-list a.is-current span {
   color: var(--text);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .archive-list a:last-child,
@@ -845,7 +850,7 @@ td {
 th {
   color: var(--muted);
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 400;
   background: #eff1f4;
   white-space: nowrap;
 }
@@ -859,7 +864,7 @@ tbody tr:hover {
 }
 
 td a {
-  font-weight: 650;
+  font-weight: 400;
   color: var(--text);
 }
 
@@ -1527,7 +1532,8 @@ tr.is-waitlist .waitlist-note {
 .board-number {
   width: 5rem;
   color: var(--muted);
-  font-weight: 700;
+  font-weight: 400;
+  font-variant-numeric: normal;
 }
 
 .result-label {
@@ -1553,7 +1559,7 @@ tr.is-waitlist .waitlist-note {
   justify-content: center;
   width: 2rem;
   height: 2rem;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--muted);
 }
 
@@ -1576,7 +1582,7 @@ tr.is-waitlist .waitlist-note {
 }
 
 .score-value {
-  font-weight: 800;
+  font-weight: 400;
 }
 
 .leaderboard-table td:nth-child(3) {
@@ -1605,11 +1611,12 @@ tr.is-waitlist .waitlist-note {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  font-weight: 700;
+  font-weight: 400;
 }
 
 .podium-slot strong {
   font-size: 1.1rem;
+  font-weight: 500;
   max-width: 100%;
   overflow-wrap: anywhere;
 }
@@ -1620,7 +1627,7 @@ tr.is-waitlist .waitlist-note {
 
 .podium-slot > span {
   font-size: 1.75rem;
-  font-weight: 800;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1942,6 +1949,7 @@ tr.is-waitlist .waitlist-note {
   .public-boards-table td.board-number::before {
     display: inline;
     margin-right: 0.35rem;
+    font: inherit;
   }
 
   .public-boards-table .public-player-col-white {
