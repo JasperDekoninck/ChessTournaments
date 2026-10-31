@@ -1543,17 +1543,12 @@ tr.is-waitlist .waitlist-note {
 
 .result-label {
   display: inline-block;
-  min-width: 4.5rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  background: #eef0f4;
   font-weight: 750;
   white-space: nowrap;
 }
 
 .result-pending {
   color: #8d6619;
-  background: #fbf2dc;
   font-size: 0.75rem;
   font-weight: 600;
 }
@@ -1575,8 +1570,6 @@ tr.is-waitlist .waitlist-note {
 }
 
 .public-boards-table .result-label {
-  padding-top: 0;
-  padding-bottom: 0;
   vertical-align: middle;
 }
 
@@ -1971,7 +1964,6 @@ tr.is-waitlist .waitlist-note {
   }
 
   .public-table .result-label {
-    min-width: 0;
     text-align: right;
   }
 
