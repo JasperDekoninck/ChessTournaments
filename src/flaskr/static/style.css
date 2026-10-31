@@ -858,6 +858,16 @@ tbody tr:hover {
   background: #f7f9fc;
 }
 
+@media (min-width: 641px) {
+  .public-boards-table tbody tr:nth-child(even) {
+    background: #eef0f3;
+  }
+
+  .public-boards-table tbody tr:nth-child(even):hover {
+    background: #e4e7eb;
+  }
+}
+
 td a {
   font-weight: 400;
   color: var(--text);
